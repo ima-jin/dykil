@@ -40,4 +40,21 @@ describe('GET /api/surveys/mine', () => {
     expect(response.status).toBe(200);
     expect(body.surveys).toEqual([{ id: 'asset_1', schema: 'dykil.survey/v1', title: 'Good' }]);
   });
+
+  it('surfaces a KernelMediaError from the kernel as its own status', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    const { KernelMediaError } = await import('@/lib/kernel/media');
+    listMySurveyAssetsMock.mockRejectedValue(new KernelMediaError('Kernel down', 503, null));
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys/mine') as never);
+    expect(response.status).toBe(503);
+  });
+
+  it('returns 500 when listing surveys fails unexpectedly', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    listMySurveyAssetsMock.mockRejectedValue(new Error('boom'));
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys/mine') as never);
+    expect(response.status).toBe(500);
+  });
 });

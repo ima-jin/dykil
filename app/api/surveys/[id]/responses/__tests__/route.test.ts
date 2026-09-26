@@ -1,47 +1,42 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  authenticateMock,
+  listAttestationsMock,
+  publishedSurveyDocFixture as doc,
+  readOwnerSurveyAssetMock,
+  readPublicSurveyAssetMock,
+  resetSurveyRouteMocks,
+  routeParams as params,
+} from '@/test/helpers/survey-route-mocks';
 
-const { authenticateMock, readPublicSurveyAssetMock, readOwnerSurveyAssetMock, listAttestationsMock } = vi.hoisted(() => ({
-  authenticateMock: vi.fn(),
-  readPublicSurveyAssetMock: vi.fn(),
-  readOwnerSurveyAssetMock: vi.fn(),
-  listAttestationsMock: vi.fn(),
-}));
+import { GET, OPTIONS } from '../route';
 
-vi.mock('@/lib/auth/authenticate', () => ({ authenticate: authenticateMock }));
-vi.mock('@/lib/kernel/media', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/kernel/media')>('@/lib/kernel/media');
-  return { ...actual, readPublicSurveyAsset: readPublicSurveyAssetMock, readOwnerSurveyAsset: readOwnerSurveyAssetMock };
+describe('OPTIONS /api/surveys/:id/responses', () => {
+  it('returns the shared CORS preflight response', async () => {
+    const response = await OPTIONS(new Request('https://dykil.imajin.ai/api/surveys/asset_1/responses') as never);
+    expect(response.status).toBeLessThan(400);
+  });
 });
-vi.mock('@/lib/kernel/attestations', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/kernel/attestations')>('@/lib/kernel/attestations');
-  return { ...actual, listAttestations: listAttestationsMock };
-});
-
-import { GET } from '../route';
-
-const doc = {
-  schema: 'dykil.survey/v1',
-  ownerDid: 'did:imajin:owner',
-  title: 'Feedback',
-  description: null,
-  fields: { elements: [] },
-  settings: {},
-  type: 'survey',
-  status: 'published',
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
-};
-
-function params(id: string) {
-  return { params: Promise.resolve({ id }) };
-}
 
 describe('GET /api/surveys/:id/responses', () => {
   beforeEach(() => {
-    authenticateMock.mockReset();
-    readPublicSurveyAssetMock.mockReset();
-    readOwnerSurveyAssetMock.mockReset();
-    listAttestationsMock.mockReset();
+    resetSurveyRouteMocks();
+  });
+
+  it('returns 401 when unauthenticated', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys/asset_1/responses') as never, params('asset_1'));
+    expect(response.status).toBe(401);
+  });
+
+  it('404s when the survey does not exist', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    readPublicSurveyAssetMock.mockResolvedValue(null);
+    readOwnerSurveyAssetMock.mockResolvedValue(null);
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys/missing/responses') as never, params('missing'));
+    expect(response.status).toBe(404);
   });
 
   it('returns 403 when the caller does not own the survey', async () => {
@@ -69,5 +64,24 @@ describe('GET /api/surveys/:id/responses', () => {
     expect(response.status).toBe(200);
     expect(body.total).toBe(2);
     expect(body.responses.map((r: { id: string }) => r.id)).toEqual(['att_legacy', 'att_old']);
+  });
+
+  it('returns 500 when the kernel call fails unexpectedly', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAttestationsMock.mockRejectedValue(new Error('boom'));
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys/asset_1/responses') as never, params('asset_1'));
+    expect(response.status).toBe(500);
+  });
+
+  it('surfaces a KernelAttestationError from the kernel as its own status', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    const { KernelAttestationError } = await import('@/lib/kernel/attestations');
+    listAttestationsMock.mockRejectedValue(new KernelAttestationError('Kernel down', 502, null));
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys/asset_1/responses') as never, params('asset_1'));
+    expect(response.status).toBe(502);
   });
 });

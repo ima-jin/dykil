@@ -132,6 +132,31 @@ describe('scripts/import-legacy', () => {
 
     vi.unstubAllGlobals();
   });
+
+  it('throws when the kernel rejects a legacy survey document upload', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => ({}) }));
+
+    const { runImport } = await import('../import-legacy');
+    await expect(runImport(['--commit'])).rejects.toThrow('Failed to create signed doc for legacy survey survey_1: 502');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('skips an orphaned response row whose survey_id has no matching legacy survey', async () => {
+    clientMock.query.mockImplementation((sql: string) => {
+      if (sql.includes('dykil.surveys')) return Promise.resolve({ rows: [] });
+      if (sql.includes('dykil.survey_responses')) return Promise.resolve({ rows: [legacyResponseRow] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    const { runImport } = await import('../import-legacy');
+    const summary = await runImport([]);
+
+    expect(summary.surveysRead).toBe(0);
+    expect(summary.responsesRead).toBe(1);
+    expect(summary.skippedAlreadyImported).toBe(1);
+    expect(createAttestationMock).not.toHaveBeenCalled();
+  });
 });
 
 function fetchWasCalledForAssetUpload(): boolean {

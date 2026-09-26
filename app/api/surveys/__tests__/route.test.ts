@@ -69,4 +69,36 @@ describe('POST /api/surveys', () => {
     const [createArgs] = createSurveyAssetMock.mock.calls[0];
     expect(createArgs.access).toBe('private');
   });
+
+  it('rejects an unparseable JSON body', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    const request = new Request('https://dykil.imajin.ai/api/surveys', { method: 'POST', body: '{not json' });
+
+    const response = await POST(request as never);
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid fields', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+
+    const response = await POST(jsonRequest({ title: 'X', fields: [] }) as never);
+    expect(response.status).toBe(400);
+  });
+
+  it('surfaces a KernelMediaError from the kernel as its own status', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    const { KernelMediaError } = await import('@/lib/kernel/media');
+    createSurveyAssetMock.mockRejectedValue(new KernelMediaError('Kernel rejected', 502, null));
+
+    const response = await POST(jsonRequest({ title: 'X', fields: [{ name: 'q1', type: 'text', title: 'Q1' }] }) as never);
+    expect(response.status).toBe(502);
+  });
+
+  it('returns 500 when survey creation fails unexpectedly', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    createSurveyAssetMock.mockRejectedValue(new Error('boom'));
+
+    const response = await POST(jsonRequest({ title: 'X', fields: [{ name: 'q1', type: 'text', title: 'Q1' }] }) as never);
+    expect(response.status).toBe(500);
+  });
 });

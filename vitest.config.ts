@@ -45,7 +45,12 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text-summary', 'lcov'],
       reportsDirectory: 'coverage',
-      include: ['app/**/*.ts', 'app/**/*.tsx', 'src/**/*.ts', 'src/**/*.tsx'],
+      // `scripts/**` was missing here — scripts/import-legacy.ts has real
+      // tests (scripts/__tests__/import-legacy.test.ts) but, since v8's
+      // coverage report only lists files matched by `include`, none of that
+      // coverage was ever surfaced to SonarCloud; the file silently read as
+      // 0% covered instead.
+      include: ['app/**/*.ts', 'app/**/*.tsx', 'src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.ts'],
       exclude: [
         '**/__tests__/**',
         '**/*.test.ts',

@@ -1,17 +1,9 @@
 import { NextRequest } from 'next/server';
-import { createLogger } from '@ima-jin/logger';
 import { authenticate } from '@/lib/auth/authenticate';
-import {
-  deleteSurveyAsset,
-  KernelMediaError,
-  readOwnerSurveyAsset,
-  readPublicSurveyAsset,
-  updateSurveyAsset,
-} from '@/lib/kernel/media';
+import { deleteSurveyAsset, KernelMediaError, readOwnerSurveyAsset, readPublicSurveyAsset, updateSurveyAsset } from '@/lib/kernel/media';
 import { corsHeaders, corsOptions, errorResponse, jsonResponse } from '@/lib/http';
 import { isSurveyDoc, normalizeSurveyFields, type SurveyDoc } from '@/lib/survey';
-
-const log = createLogger('dykil');
+import { handleSurveyRouteError, requireOwnedSurvey } from '@/lib/route-helpers';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -62,11 +54,7 @@ export async function GET(request: NextRequest, props: RouteParams) {
 
     return errorResponse('Survey not found', 404, cors);
   } catch (error) {
-    if (error instanceof KernelMediaError) {
-      return errorResponse(error.message, error.status, cors);
-    }
-    log.error({ err: String(error) }, 'Failed to fetch survey');
-    return errorResponse('Failed to fetch survey', 500, cors);
+    return handleSurveyRouteError(error, cors, 'Failed to fetch survey');
   }
 }
 
@@ -82,18 +70,13 @@ export async function PUT(request: NextRequest, props: RouteParams) {
   const did = authResult.auth.did;
 
   try {
-    const existing = await readOwnerSurveyAsset(id, request);
-    if (!existing || !isSurveyDoc(existing.content)) {
-      return errorResponse('Survey not found', 404, cors);
-    }
-    if (existing.content.ownerDid !== did) {
-      return errorResponse('Not authorized to update this survey', 403, cors);
-    }
+    const owned = await requireOwnedSurvey(id, did, request, cors, 'Not authorized to update this survey');
+    if ('response' in owned) return owned.response;
 
     const body = await request.json();
     const { title, description, fields, settings, type, status } = body as Partial<SurveyDoc>;
 
-    const updated: SurveyDoc = { ...existing.content };
+    const updated: SurveyDoc = { ...owned.survey };
     if (title !== undefined) updated.title = title;
     if (description !== undefined) updated.description = description;
     if (fields !== undefined) {
@@ -109,11 +92,7 @@ export async function PUT(request: NextRequest, props: RouteParams) {
     await updateSurveyAsset(id, JSON.stringify(updated), request);
     return jsonResponse({ id, ...updated }, 200, cors);
   } catch (error) {
-    if (error instanceof KernelMediaError) {
-      return errorResponse(error.message, error.status, cors);
-    }
-    log.error({ err: String(error) }, 'Failed to update survey');
-    return errorResponse('Failed to update survey', 500, cors);
+    return handleSurveyRouteError(error, cors, 'Failed to update survey');
   }
 }
 
@@ -129,21 +108,12 @@ export async function DELETE(request: NextRequest, props: RouteParams) {
   const did = authResult.auth.did;
 
   try {
-    const existing = await readOwnerSurveyAsset(id, request);
-    if (!existing || !isSurveyDoc(existing.content)) {
-      return errorResponse('Survey not found', 404, cors);
-    }
-    if (existing.content.ownerDid !== did) {
-      return errorResponse('Not authorized to delete this survey', 403, cors);
-    }
+    const owned = await requireOwnedSurvey(id, did, request, cors, 'Not authorized to delete this survey');
+    if ('response' in owned) return owned.response;
 
     await deleteSurveyAsset(id, request);
     return jsonResponse({ deleted: true }, 200, cors);
   } catch (error) {
-    if (error instanceof KernelMediaError) {
-      return errorResponse(error.message, error.status, cors);
-    }
-    log.error({ err: String(error) }, 'Failed to delete survey');
-    return errorResponse('Failed to delete survey', 500, cors);
+    return handleSurveyRouteError(error, cors, 'Failed to delete survey');
   }
 }

@@ -28,7 +28,8 @@ vi.mock('@/lib/ticket-gate', async () => {
   return { ...actual, defaultTicketGate: () => ({ hasAccess: hasAccessMock }) };
 });
 
-import { POST } from '../route';
+import { OPTIONS, POST } from '../route';
+import { TicketGateNotConfiguredError } from '@/lib/ticket-gate';
 
 const publishedDoc = {
   schema: 'dykil.survey/v1',
@@ -54,6 +55,13 @@ function respondRequest(body: unknown) {
   });
 }
 
+describe('OPTIONS /api/surveys/:id/respond', () => {
+  it('returns the shared CORS preflight response', async () => {
+    const response = await OPTIONS(new Request('https://dykil.imajin.ai/api/surveys/asset_1/respond') as never);
+    expect(response.status).toBeLessThan(400);
+  });
+});
+
 describe('POST /api/surveys/:id/respond', () => {
   beforeEach(() => {
     authenticateMock.mockReset();
@@ -65,8 +73,33 @@ describe('POST /api/surveys/:id/respond', () => {
     readPublicSurveyAssetMock.mockResolvedValue(publishedDoc);
   });
 
+  it('returns 401 when unauthenticated', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
+    const response = await POST(respondRequest({ answers: { q1: 'yes' }, issuedAt: 1, signature: 'sig' }) as never, params('asset_1'));
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects an unparseable JSON body', async () => {
+    const request = new Request('https://dykil.imajin.ai/api/surveys/asset_1/respond', {
+      method: 'POST',
+      body: '{not json',
+    });
+    const response = await POST(request as never, params('asset_1'));
+    expect(response.status).toBe(400);
+  });
+
   it('requires answers, issuedAt, and signature', async () => {
     const response = await POST(respondRequest({}) as never, params('asset_1'));
+    expect(response.status).toBe(400);
+  });
+
+  it('requires issuedAt when answers are present', async () => {
+    const response = await POST(respondRequest({ answers: { q1: 'yes' }, signature: 'sig' }) as never, params('asset_1'));
+    expect(response.status).toBe(400);
+  });
+
+  it('requires a signature', async () => {
+    const response = await POST(respondRequest({ answers: { q1: 'yes' }, issuedAt: 1 }) as never, params('asset_1'));
     expect(response.status).toBe(400);
   });
 
@@ -76,6 +109,17 @@ describe('POST /api/surveys/:id/respond', () => {
       params('asset_1'),
     );
     expect(response.status).toBe(400);
+  });
+
+  it('404s when the survey cannot be resolved via either the public or owner-read path', async () => {
+    readPublicSurveyAssetMock.mockResolvedValue(null);
+    readOwnerSurveyAssetMock.mockRejectedValue(new Error('not found'));
+
+    const response = await POST(
+      respondRequest({ answers: { q1: 'yes' }, issuedAt: 1, signature: 'sig' }) as never,
+      params('missing'),
+    );
+    expect(response.status).toBe(404);
   });
 
   it('rejects a response to a non-published survey', async () => {
@@ -137,5 +181,53 @@ describe('POST /api/surveys/:id/respond', () => {
     );
 
     expect(response.status).toBe(201);
+  });
+
+  it('surfaces a 501 when the ticket gate is not configured', async () => {
+    readPublicSurveyAssetMock.mockResolvedValue({ ...publishedDoc, settings: { eventId: 'event_1' } });
+    hasAccessMock.mockRejectedValue(new TicketGateNotConfiguredError());
+
+    const response = await POST(
+      respondRequest({ answers: { q1: 'yes' }, issuedAt: 1, signature: 'sig' }) as never,
+      params('asset_1'),
+    );
+
+    expect(response.status).toBe(501);
+    expect(createAttestationMock).not.toHaveBeenCalled();
+  });
+
+  it('rethrows an unexpected ticket-gate failure to the outer catch', async () => {
+    readPublicSurveyAssetMock.mockResolvedValue({ ...publishedDoc, settings: { eventId: 'event_1' } });
+    hasAccessMock.mockRejectedValue(new Error('gate unreachable'));
+
+    const response = await POST(
+      respondRequest({ answers: { q1: 'yes' }, issuedAt: 1, signature: 'sig' }) as never,
+      params('asset_1'),
+    );
+
+    expect(response.status).toBe(500);
+  });
+
+  it("surfaces a KernelAttestationError from the kernel as its own status", async () => {
+    const { KernelAttestationError } = await import('@/lib/kernel/attestations');
+    createAttestationMock.mockRejectedValue(new KernelAttestationError('Kernel rejected', 502, null));
+
+    const response = await POST(
+      respondRequest({ answers: { q1: 'yes' }, issuedAt: 1, signature: 'sig' }) as never,
+      params('asset_1'),
+    );
+
+    expect(response.status).toBe(502);
+  });
+
+  it('returns 500 when submission fails unexpectedly', async () => {
+    createAttestationMock.mockRejectedValue(new Error('boom'));
+
+    const response = await POST(
+      respondRequest({ answers: { q1: 'yes' }, issuedAt: 1, signature: 'sig' }) as never,
+      params('asset_1'),
+    );
+
+    expect(response.status).toBe(500);
   });
 });
