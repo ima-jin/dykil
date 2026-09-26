@@ -80,3 +80,5 @@ instrumentation.ts ← refuses to boot without IMAJIN_APP_DID
 Every Imajin app before the external integrators was first-party (same repo, same server, privileged access). Apps
 built from this template are the **external-integrator** test: if this app can do everything it needs through app-auth
 and the public API alone, the federated-app boundary is real.
+
+Rebuild in progress — #1985
