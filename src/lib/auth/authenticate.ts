@@ -12,8 +12,8 @@ import { thisAppHost } from '@/lib/env';
  * route-by-route migration.
  *
  * Current implementation: `requireSessionOrAppToken` (`@ima-jin/auth`,
- * GitHub Packages) — mirrors coffee's #1974 reference adoption of the
- * #1069 Phase 1 scoped app-token, scoped to `aud = thisAppHost()`, with the
+ * npmjs.org) — mirrors coffee's #1974 reference adoption of the #1069
+ * Phase 1 scoped app-token, scoped to `aud = thisAppHost()`, with the
  * shared kernel session cookie as a transitional fallback.
  *
  * Candidate alternative implementation (not wired up, kept here as a

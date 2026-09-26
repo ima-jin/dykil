@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@ima-jin/auth": "^0.8.7",
-    "@ima-jin/config": "^0.8.7",
+    "@ima-jin/config": "^0.8.0",
     "@ima-jin/logger": "^0.8.7",
     "next": "^15.5.24",
     "pg": "^8.13.0",
@@ -37,5 +37,10 @@
     "tsx": "^4.19.0",
     "typescript": "^5",
     "vitest": "^2.1.9"
+  },
+  "pnpm": {
+    "overrides": {
+      "@ima-jin/config": "0.8.0"
+    }
   }
 }

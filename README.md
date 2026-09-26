@@ -27,17 +27,15 @@ genuine respondent-signed ones in the data, and never upgraded.
 2. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_APP_DID`, `NEXT_PUBLIC_IMAJIN_APP_ID`,
    `AUTH_SERVICE_URL`, `MEDIA_SERVICE_URL`. This app refuses to start without `IMAJIN_APP_DID` (see
    `instrumentation.ts`).
-3. **Install dependencies** — `@ima-jin/auth`, `@ima-jin/config`, and `@ima-jin/logger` are published to GitHub
-   Packages only (see `.npmrc`), needing a `read:packages` token:
+3. **Install dependencies** — `@ima-jin/auth`, `@ima-jin/config`, and `@ima-jin/logger` are published to
+   npmjs.org under the `@ima-jin` scope. Anonymous install, no token needed:
    ```bash
-   export GITHUB_PACKAGES_TOKEN="<a token with read:packages>"
    pnpm install
    ```
-   > `pnpm-lock.yaml` in this PR does not yet include those three packages — the environment this
-   > PR was built in had no `read:packages` token for the `ima-jin` org (see `docs/packages/PUBLISHING.md`
-   > upstream). The first real `pnpm install` above, run with a valid token, completes the lockfile;
-   > commit that update before merging or deploying. `pnpm install --frozen-lockfile` (CI) will fail
-   > loudly until then, the same way `sonarcloud.yml` fails loudly without `SONAR_TOKEN` — on purpose.
+   > `@ima-jin/auth@0.8.7`'s own manifest depends on `@ima-jin/config@^0.8.7`, which isn't published
+   > (only `0.7.0`/`0.8.0`/`1.0.0` are, as of this writing) — `package.json`'s `pnpm.overrides` pins
+   > `@ima-jin/config` to the actually-published `0.8.0` so installation succeeds. Drop that override
+   > once `@ima-jin/config@0.8.7` (or later, matching auth/logger) is published.
 4. **Run it**:
    ```bash
    pnpm dev
@@ -66,10 +64,10 @@ mechanism (currently `requireSessionOrAppToken`) is a deliberately swappable, st
 
 ## Consuming `@ima-jin/*`
 
-`@ima-jin/auth`, `@ima-jin/config`, and `@ima-jin/logger` are published to **GitHub Packages**
-(`npm.pkg.github.com`, `@ima-jin` scope) — see `docs/packages/PUBLISHING.md` upstream, which names this app as
-their first out-of-repo consumer. Anonymous `npm install` doesn't work for them; you need a `read:packages` token
-(see `.npmrc`). CI (`ci.yml`, `sonarcloud.yml`) reads that token from a `GITHUB_PACKAGES_TOKEN` repo/org secret.
+`@ima-jin/auth`, `@ima-jin/config`, and `@ima-jin/logger` are published to **npmjs.org** under the `@ima-jin`
+scope — anonymous `npm install`/`pnpm install`, no `.npmrc` scoping and no auth token needed. See the version-skew
+note above for the one thing to watch: `@ima-jin/auth`'s dependency on `@ima-jin/config` currently outpaces what's
+published for `config` itself.
 
 ## Layout
 
