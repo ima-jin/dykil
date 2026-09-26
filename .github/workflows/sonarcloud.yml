@@ -58,6 +58,9 @@ jobs:
         # --ignore-scripts: this job only needs to run the test suite for
         # coverage, not build native addons — no lifecycle script here is
         # required for `pnpm run test:coverage` to succeed (verified locally).
+        # GITHUB_PACKAGES_TOKEN: see .github/workflows/ci.yml's Install step comment.
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Generate coverage

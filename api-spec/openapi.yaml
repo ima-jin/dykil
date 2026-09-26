@@ -1,26 +1,64 @@
 openapi: "3.1.0"
 info:
-  title: imajin-app-template
-  version: "0.1.0"
+  title: dykil
+  version: "1.0.0"
   description: >
-    A third-party app on Imajin. This spec is served by the app itself at
-    /api/spec and aggregated by the kernel's service registry, the same way
-    every other app on the platform is discovered.
-
+    Surveys & polls, rebuilt on Imajin kernel primitives (refs #1985): a
+    survey is a signed document (kernel media asset), a response is an
+    attestation, and ticket-holder checks compose through a boolean gate.
+    This app owns no database of its own.
 servers:
+  - url: https://dykil.imajin.ai
+    description: production
+  - url: https://dev-dykil.imajin.ai
+    description: dev
   - url: http://localhost:3000
     description: local
 
 tags:
-  - name: app-template
+  - name: dykil
 
 components:
   securitySchemes:
+    appToken:
+      type: http
+      scheme: bearer
+      description: >
+        Scoped app token minted via POST {kernel}/auth/api/tokens/app,
+        verified by this app's single authenticate() interface
+        (src/lib/auth/authenticate.ts).
     cookieAuth:
       type: apiKey
       in: cookie
       name: imajin_session
+      description: Shared kernel session cookie fallback (transitional — see FINDINGS.md).
   schemas:
+    Survey:
+      type: object
+      properties:
+        id: { type: string }
+        ownerDid: { type: string }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        fields:
+          type: object
+          properties:
+            elements: { type: array, items: { type: object } }
+        settings: { type: object }
+        type: { type: string, enum: [survey, pre-event, post-event, form] }
+        status: { type: string, enum: [draft, published, closed] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Attestation:
+      type: object
+      properties:
+        id: { type: string }
+        issuerDid: { type: string }
+        subjectDid: { type: string }
+        type: { type: string }
+        contextId: { type: string, nullable: true }
+        payload: { type: object }
+        issuedAt: { type: string, format: date-time }
     Error:
       type: object
       required: [error]
@@ -32,37 +70,221 @@ paths:
     get:
       operationId: getHealth
       summary: Health check
-      tags: [app-template]
+      tags: [dykil]
       responses:
         "200":
           description: Service is healthy
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status: { type: string, example: ok }
-                  service: { type: string, example: imajin-app-template }
-                  timestamp: { type: string, format: date-time }
 
-  /api/me:
+  /api/spec:
     get:
-      operationId: getMe
-      summary: Return the signed-in caller's DID
-      tags: [app-template]
-      security:
-        - cookieAuth: []
+      operationId: getSpec
+      summary: Serve this app's own OpenAPI document
+      tags: [dykil]
       responses:
         "200":
-          description: The caller's DID
+          description: OpenAPI YAML document
+
+  /api/surveys:
+    post:
+      operationId: createSurvey
+      summary: Create a survey (a signed media-asset document owned by the caller)
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, fields]
+              properties:
+                title: { type: string }
+                description: { type: string }
+                fields: { type: object }
+                settings: { type: object }
+                type: { type: string, enum: [survey, pre-event, post-event, form] }
+                status: { type: string, enum: [draft, published] }
+      responses:
+        "201":
+          description: Survey created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Survey" }
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+
+  /api/surveys/mine:
+    get:
+      operationId: listMySurveys
+      summary: List the caller's own surveys
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      responses:
+        "200":
+          description: Surveys list
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  did: { type: string }
-        "401":
-          description: Not authenticated
+                  surveys: { type: array, items: { $ref: "#/components/schemas/Survey" } }
+
+  /api/surveys/handle/{handle}:
+    get:
+      operationId: getSurveysByHandle
+      summary: Get published surveys by handle (unimplemented stub — see FINDINGS.md gap #2397)
+      tags: [dykil]
+      parameters:
+        - { name: handle, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Always an empty list today
+
+  /api/surveys/{id}:
+    get:
+      operationId: getSurvey
+      summary: Get survey by id. Published surveys are public; drafts require ownership.
+      tags: [dykil]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      security: [{ appToken: [] }, { cookieAuth: [] }, {}]
+      responses:
+        "200":
+          description: Survey
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Error" }
+              schema: { $ref: "#/components/schemas/Survey" }
+        "404":
+          description: Not found (or unpublished and not owner)
+    put:
+      operationId: updateSurvey
+      summary: Update survey (owner only)
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Survey updated
+        "403":
+          description: Not the survey owner
+        "404":
+          description: Survey not found
+    delete:
+      operationId: deleteSurvey
+      summary: Delete survey (owner only)
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Deleted
+        "403":
+          description: Not the survey owner
+        "404":
+          description: Survey not found
+
+  /api/surveys/{id}/respond:
+    post:
+      operationId: submitSurveyResponse
+      summary: Submit a respondent-signed response (an attestation, not a table row)
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers, issuedAt, signature]
+              properties:
+                answers: { type: object }
+                ticketId: { type: string }
+                issuedAt:
+                  type: integer
+                  description: Unix ms timestamp, part of the signed canonical payload
+                signature:
+                  type: string
+                  description: >
+                    Ed25519 signature (hex) by the respondent's own DID key over
+                    canonicalResponsePayload(...) — see FINDINGS.md gap #2394.
+      responses:
+        "201":
+          description: Response recorded as an attestation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  response: { $ref: "#/components/schemas/Attestation" }
+        "400":
+          description: Missing required fields or validation error
+        "403":
+          description: Survey not accepting responses, or ticket gate denied
+        "404":
+          description: Survey not found
+        "501":
+          description: Ticket gate not configured (see FINDINGS.md gap #2395)
+
+  /api/surveys/{id}/responses:
+    get:
+      operationId: getSurveyResponses
+      summary: All responses for a survey, as attestations (owner only)
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Responses
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  responses: { type: array, items: { $ref: "#/components/schemas/Attestation" } }
+                  total: { type: integer }
+        "403":
+          description: Not the survey owner
+        "404":
+          description: Survey not found
+
+  /api/surveys/{id}/responses/check:
+    get:
+      operationId: checkSurveyResponse
+      summary: >
+        Has the caller (or a given ticket) already responded? Replaces the
+        original by-ticket row read — never returns raw ticket data.
+      tags: [dykil]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: ticketId
+          in: query
+          schema: { type: string }
+          description: Ticket-scoped check (no auth required)
+        - name: include
+          in: query
+          schema: { type: string, enum: [answers] }
+      security: [{ appToken: [] }, { cookieAuth: [] }, {}]
+      responses:
+        "200":
+          description: Response check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  completed: { type: boolean }
+                  responseId: { type: string }
+                  answers: { type: object }

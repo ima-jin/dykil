@@ -78,6 +78,13 @@ jobs:
 
       - name: Install
         if: steps.detect.outputs.has_app == 'true'
+        # @ima-jin/auth, @ima-jin/config, and @ima-jin/logger are published to GitHub
+        # Packages only (see .npmrc, docs/packages/PUBLISHING.md upstream) — a repo
+        # admin must add a GITHUB_PACKAGES_TOKEN secret (a PAT with read:packages on
+        # the ima-jin org) before this step can succeed, the same one-time setup
+        # sonarcloud.yml documents for SONAR_TOKEN.
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
         run: |
           case "${{ steps.pm.outputs.pm }}" in
             pnpm) pnpm install --frozen-lockfile ;;

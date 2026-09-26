@@ -1,11 +1,12 @@
 export default function HomePage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
-      <h1 className="text-2xl font-semibold text-white">Imajin App Template</h1>
+      <h1 className="text-2xl font-semibold text-white">dykil</h1>
       <p className="mt-4 text-gray-400">
-        A working, forkable Next.js app that composes the Imajin platform through its public
-        app surface only. See <code>AGENTS.md</code> and <code>docs/</code> before building on
-        this template.
+        Surveys &amp; polls, rebuilt on Imajin kernel primitives: a survey is a signed document, a
+        response is an attestation, and ticket-holder checks compose through the events app&apos;s
+        gate. This app owns no database of its own — see <code>FINDINGS.md</code> and{' '}
+        <code>docs/ARCHITECTURE.md</code>.
       </p>
       <ul className="mt-6 space-y-2 text-sm">
         <li>
@@ -17,12 +18,6 @@ export default function HomePage() {
           <a className="text-amber-400 hover:underline" href="/api/spec">
             /api/spec
           </a>
-        </li>
-        <li>
-          <a className="text-amber-400 hover:underline" href="/api/me">
-            /api/me
-          </a>{' '}
-          — returns your DID once signed in
         </li>
       </ul>
     </div>
