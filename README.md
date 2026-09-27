@@ -40,7 +40,9 @@ genuine respondent-signed ones in the data, and never upgraded.
    ```bash
    pnpm dev
    ```
-   `/api/health` and `/api/spec` respond immediately.
+   The app is served under the `/dykil` basePath (Caddy forwards `/dykil/*` with the prefix
+   intact). Locally: `http://localhost:3101/dykil` — `/dykil/api/health` and `/dykil/api/spec`
+   respond immediately.
 
 ## The 10 routes
 
