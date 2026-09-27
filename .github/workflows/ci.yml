@@ -78,6 +78,8 @@ jobs:
 
       - name: Install
         if: steps.detect.outputs.has_app == 'true'
+        # @ima-jin/auth, @ima-jin/config, and @ima-jin/logger are published to
+        # npmjs.org under the @ima-jin scope — anonymous install, no token needed.
         run: |
           case "${{ steps.pm.outputs.pm }}" in
             pnpm) pnpm install --frozen-lockfile ;;

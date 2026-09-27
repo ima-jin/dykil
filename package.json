@@ -1,5 +1,5 @@
 {
-  "name": "imajin-app-template",
+  "name": "dykil",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.0",
@@ -11,31 +11,36 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "import-legacy": "tsx scripts/import-legacy.ts"
   },
   "dependencies": {
-    "@ima-jin/auth-client": "^0.6.1",
-    "drizzle-orm": "^0.45.1",
+    "@ima-jin/auth": "^0.8.7",
+    "@ima-jin/config": "^0.8.0",
+    "@ima-jin/logger": "^0.8.7",
     "next": "^15.5.24",
-    "postgres": "^3.4.5",
+    "pg": "^8.13.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@types/node": "^20",
+    "@types/pg": "^8.11.0",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10",
-    "drizzle-kit": "^0.31.9",
     "eslint": "^9",
     "eslint-config-next": "^15.5.24",
     "postcss": "^8",
     "tailwindcss": "^3.4.0",
+    "tsx": "^4.19.0",
     "typescript": "^5",
     "vitest": "^2.1.9"
+  },
+  "pnpm": {
+    "overrides": {
+      "@ima-jin/config": "0.8.0"
+    }
   }
 }

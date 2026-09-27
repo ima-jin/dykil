@@ -1,16 +1,14 @@
 <!--
-  ┌─────────────────────────────────────────────────────────────────────┐
-  │  FORK CHECKLIST — fill this in first, then delete this comment block  │
-  │                                                                       │
-  │  APP NAME:        <e.g. AgriFortress>                                 │
-  │  APP DID:         <did:imajin:… — from app registration>             │
-  │  SCOPES:          <e.g. supply:read, supply:write>                    │
-  │  DOMAIN:          <e.g. integrity.imajin.ai>                          │
-  │  KERNEL:          <prod: https://jin.imajin.ai | dev: https://dev-jin.imajin.ai> │
-  │  REFERENCE APP:   ima-jin/imajin-scorecard                            │
-  │                                                                       │
-  │  Then: fill the "This App" section, keep everything else, delete me.  │
-  └─────────────────────────────────────────────────────────────────────┘
+  FORK CHECKLIST (completed 2026-09-26, refs #1985):
+  APP NAME: dykil · APP DID: did:imajin:REPLACE_ME (set at registration, #1990)
+  SCOPES: none required (this app owns no domain scope; it composes attestations + media
+    as the authenticated caller) · DOMAIN: dykil.imajin.ai
+  KERNEL: prod https://jin.imajin.ai | dev https://dev-jin.imajin.ai
+  REFERENCE APP: ima-jin/imajin-scorecard (template default) — this app instead follows an
+    explicit product decision to adopt @imajin/auth's requireSessionOrAppToken end-to-end,
+    mirroring coffee's #1974 reference adoption, behind a single authenticate() interface
+    (src/lib/auth/authenticate.ts). See §8 and FINDINGS.md for why the mechanism itself is a
+    genuinely open a/b/c call rather than a settled pattern.
 -->
 
 # AGENTS.md — Third-Party App on Imajin
@@ -27,8 +25,8 @@ file before touching code — it defines the boundary you must not cross and the
 2. Register the app with the kernel — [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
 3. Set env: `cp .env.example .env.local` and fill it in (the app refuses to start without
    `IMAJIN_APP_DID` — see `instrumentation.ts`).
-4. `pnpm db:migrate` — this app's own Postgres schema only, see
-   [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+4. This app owns no database — there is no migration step. See
+   [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and `FINDINGS.md`.
 5. `pnpm dev`.
 
 ---
@@ -193,13 +191,28 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
 
 ## 8. This App (fork fills this in)
 
-> Replace this whole section in the fork. Keep §1–§7 intact.
-
-- **What it is:** _<one-line purpose>_
-- **App DID:** _<did:imajin:…>_
-- **Scopes:** _<e.g. supply:read, supply:write>_
-- **Domain:** _<e.g. app.imajin.ai>_
-- **The real-world loop it instruments:** _<who → who, what changes hands, the one paid leg>_
-- **Domain events it emits (via kernel API):** _<e.g. supply.declared → supply.received>_
-- **Connectors it consumes:** _<e.g. QuickBooks (user self-authorizes)>_
-- **Scope guardrails specific to this app:** _<the "do not build X" list — keep it provable, not comprehensive>_
+- **What it is:** Surveys & polls, rebuilt on kernel primitives (refs #1985) — a survey is a
+  signed document (media asset), a response is an attestation, and ticket-holder checks
+  compose through a boolean gate. This app owns no database of its own.
+- **App DID:** _<did:imajin:… — set at registration, docs/REGISTRATION.md>_
+- **Scopes:** none of the closed grant-capability or SCOPES vocabularies apply; this app
+  authenticates callers via a single `authenticate()` interface
+  (`src/lib/auth/authenticate.ts`, currently `requireSessionOrAppToken`) and relies entirely
+  on the caller's own DID + the kernel's own authorization checks on each downstream call.
+- **Domain:** dykil.imajin.ai (pm2 entry `dykil`, Caddy route unchanged per #1985).
+- **The real-world loop it instruments:** a survey owner → a respondent: the owner publishes
+  a signed survey document, the respondent signs and submits an attestation answering it.
+  No paid leg.
+- **Domain events it emits (via kernel API):** none yet — attestations of type
+  `dykil/survey-response` / `dykil/survey-response-legacy-import` are the closest analog,
+  emitted via `POST {kernel}/auth/api/attestations`, not the bus.
+- **Connectors it consumes:** none. The only cross-app composition is the events app's
+  ticket-holder gate (`src/lib/ticket-gate.ts`), not yet implemented upstream — see
+  [ima-jin/imajin-ai#2395](https://github.com/ima-jin/imajin-ai/issues/2395).
+- **Scope guardrails specific to this app:** never read `events`/ticket rows directly, even
+  for a ticket-scoped survey — always go through the gate. Never store a survey or response
+  in a table of its own (Ryan's ruling, 2026-09-22). Never sign an attestation with this
+  app's own key on behalf of a respondent — only NODE-WITNESSED LEGACY-IMPORT rows are
+  self-signed by this app; every new response must carry the respondent's own signature.
+  Never call `@ima-jin/auth`'s auth primitives directly from a route — always go through
+  `authenticate()`.

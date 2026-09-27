@@ -58,6 +58,7 @@ jobs:
         # --ignore-scripts: this job only needs to run the test suite for
         # coverage, not build native addons — no lifecycle script here is
         # required for `pnpm run test:coverage` to succeed (verified locally).
+        # @ima-jin/* deps are published to npmjs.org — anonymous install, no token needed.
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Generate coverage
