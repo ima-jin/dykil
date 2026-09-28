@@ -11,6 +11,10 @@ export default defineConfig({
       // (via `server.deps.inline` below) the published `@ima-jin/*` packages,
       // which also import `NextResponse` from `next/server`.
       'next/server': fileURLToPath(new URL('./src/test/next-server-shim.ts', import.meta.url)),
+      // See src/test/next-headers-shim.ts — same rationale, for
+      // `@ima-jin/auth-client`'s single-entrypoint import of `next/headers`'
+      // request-scoped `cookies()`.
+      'next/headers': fileURLToPath(new URL('./src/test/next-headers-shim.ts', import.meta.url)),
     },
   },
   test: {
@@ -32,11 +36,12 @@ export default defineConfig({
       // Node's native loader still handles those directly. Esbuild's
       // dependency-optimizer pass, by contrast, uses Vite's real resolver
       // (including aliases) while pre-bundling, which is what actually gets
-      // the `next/server` alias above applied inside `@ima-jin/*`.
+      // the `next/server` / `next/headers` aliases above applied inside
+      // `@ima-jin/*`.
       optimizer: {
         ssr: {
           enabled: true,
-          include: ['@ima-jin/auth', '@ima-jin/config', '@ima-jin/logger'],
+          include: ['@ima-jin/auth', '@ima-jin/auth-client', '@ima-jin/config', '@ima-jin/logger'],
         },
       },
     },

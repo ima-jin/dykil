@@ -21,14 +21,13 @@ export function mediaServiceUrl(): string {
   return required('MEDIA_SERVICE_URL');
 }
 
-/** This app's own registered DID (see docs/REGISTRATION.md). */
+/**
+ * This app's own registered DID (see docs/REGISTRATION.md). Only required
+ * once a bootstrap keystore already exists (`loadAppSigningKey()`'s first
+ * boot returns it directly) — see `src/lib/auth/signing-identity.ts`.
+ */
 export function appDid(): string | undefined {
   return process.env.IMAJIN_APP_DID;
-}
-
-/** This app's own Ed25519 private key, used only for self-signed legacy-import attestations. */
-export function appPrivateKey(): string | undefined {
-  return process.env.DYKIL_APP_PRIVATE_KEY;
 }
 
 export function responseAttestationType(): string {

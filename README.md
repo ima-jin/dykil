@@ -23,12 +23,16 @@ genuine respondent-signed ones in the data, and never upgraded.
 ## Getting started
 
 1. **Register this app with the kernel** — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md). You'll get back
-   this app's `appDid`, registry `id`, and its own keypair (used only for legacy-import self-signing).
-2. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_APP_DID`, `NEXT_PUBLIC_IMAJIN_APP_ID`,
-   `AUTH_SERVICE_URL`, `MEDIA_SERVICE_URL`. This app refuses to start without `IMAJIN_APP_DID` (see
-   `instrumentation.ts`).
-3. **Install dependencies** — `@ima-jin/auth`, `@ima-jin/config`, and `@ima-jin/logger` are published to
-   npmjs.org under the `@ima-jin` scope. Anonymous install, no token needed:
+   this app's `appDid` and registry `id`; an operator approving `apps.provision` grants it a vault-minted
+   signing key and a one-time claim code — this app never holds its own private key in an env file
+   (refs [imajin-ai#2411](https://github.com/ima-jin/imajin-ai/issues/2411)).
+2. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_KERNEL_URL`, `IMAJIN_APP_DID`,
+   `NEXT_PUBLIC_IMAJIN_APP_ID`, `AUTH_SERVICE_URL`, `MEDIA_SERVICE_URL`, and (first boot only)
+   `IMAJIN_APP_CLAIM_CODE`. This app refuses to start without a signing key it can fetch via
+   `loadAppSigningKey()` (see `instrumentation.ts`), and fails loud if a raw `DYKIL_APP_PRIVATE_KEY`
+   is still set.
+3. **Install dependencies** — `@ima-jin/auth`, `@ima-jin/auth-client`, `@ima-jin/config`, and `@ima-jin/logger`
+   are published to npmjs.org under the `@ima-jin` scope. Anonymous install, no token needed:
    ```bash
    pnpm install
    ```
@@ -66,10 +70,12 @@ mechanism (currently `requireSessionOrAppToken`) is a deliberately swappable, st
 
 ## Consuming `@ima-jin/*`
 
-`@ima-jin/auth`, `@ima-jin/config`, and `@ima-jin/logger` are published to **npmjs.org** under the `@ima-jin`
-scope — anonymous `npm install`/`pnpm install`, no `.npmrc` scoping and no auth token needed. See the version-skew
-note above for the one thing to watch: `@ima-jin/auth`'s dependency on `@ima-jin/config` currently outpaces what's
-published for `config` itself.
+`@ima-jin/auth`, `@ima-jin/auth-client`, `@ima-jin/config`, and `@ima-jin/logger` are published to **npmjs.org**
+under the `@ima-jin` scope — anonymous `npm install`/`pnpm install`, no `.npmrc` scoping and no auth token needed.
+See the version-skew note above for the one thing to watch: `@ima-jin/auth`'s dependency on `@ima-jin/config`
+currently outpaces what's published for `config` itself. `@ima-jin/auth-client`'s `loadAppSigningKey()` is what
+fetches this app's own signing key at boot — see `src/lib/auth/signing-identity.ts` and
+[`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
 
 ## Layout
 
@@ -91,10 +97,11 @@ src/
       attestations.ts      <- kernel auth-service client (responses)
     auth/
       authenticate.ts       <- this app's single inbound-auth interface
+      signing-identity.ts   <- this app's own signing key, fetched via loadAppSigningKey()
 scripts/
   import-legacy.ts  <- one-pass legacy backport, dry-run by default
 api-spec/          <- this app's own OpenAPI document, served at /api/spec
-instrumentation.ts <- refuses to boot without IMAJIN_APP_DID
+instrumentation.ts <- refuses to boot without a fetchable signing key (loadAppSigningKey())
 ```
 
 ## The honest test
