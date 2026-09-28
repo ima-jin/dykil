@@ -4,7 +4,6 @@ const ENV_KEYS = [
   'AUTH_SERVICE_URL',
   'MEDIA_SERVICE_URL',
   'IMAJIN_APP_DID',
-  'DYKIL_APP_PRIVATE_KEY',
   'DYKIL_RESPONSE_ATTESTATION_TYPE',
   'DYKIL_LEGACY_IMPORT_ATTESTATION_TYPE',
   'NEXT_PUBLIC_APP_URL',
@@ -58,17 +57,6 @@ describe('src/lib/env', () => {
     process.env.IMAJIN_APP_DID = 'did:imajin:dykil-app';
     const { appDid } = await import('@/lib/env');
     expect(appDid()).toBe('did:imajin:dykil-app');
-  });
-
-  it('appPrivateKey returns undefined when not set', async () => {
-    const { appPrivateKey } = await import('@/lib/env');
-    expect(appPrivateKey()).toBeUndefined();
-  });
-
-  it('appPrivateKey returns the configured key', async () => {
-    process.env.DYKIL_APP_PRIVATE_KEY = 'deadbeef';
-    const { appPrivateKey } = await import('@/lib/env');
-    expect(appPrivateKey()).toBe('deadbeef');
   });
 
   it('responseAttestationType defaults when unset', async () => {

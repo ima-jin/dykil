@@ -10,6 +10,10 @@ build/
 .env.*.local
 !.env.example
 
+# Local bootstrap keystore (loadAppSigningKey(), default IMAJIN_APP_KEYSTORE
+# path) — never the vault signing key itself, but never committed either.
+.imajin/
+
 *.log
 npm-debug.log*
 .DS_Store

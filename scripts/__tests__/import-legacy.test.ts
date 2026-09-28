@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { clientMock, listAttestationsMock, createAttestationMock, signMock } = vi.hoisted(() => ({
+const { clientMock, listAttestationsMock, createAttestationMock, signMock, bootstrapSigningIdentityMock, getSigningIdentityMock } = vi.hoisted(() => ({
   clientMock: {
     connect: vi.fn(),
     end: vi.fn(),
@@ -9,6 +9,8 @@ const { clientMock, listAttestationsMock, createAttestationMock, signMock } = vi
   listAttestationsMock: vi.fn(),
   createAttestationMock: vi.fn(),
   signMock: vi.fn(),
+  bootstrapSigningIdentityMock: vi.fn(),
+  getSigningIdentityMock: vi.fn(),
 }));
 
 vi.mock('pg', () => ({ Client: vi.fn(() => clientMock) }));
@@ -20,6 +22,10 @@ vi.mock('../../src/lib/kernel/attestations', async () => {
   const actual = await vi.importActual<typeof import('../../src/lib/kernel/attestations')>('../../src/lib/kernel/attestations');
   return { ...actual, listAttestations: listAttestationsMock, createAttestation: createAttestationMock };
 });
+vi.mock('../../src/lib/auth/signing-identity', () => ({
+  bootstrapSigningIdentity: bootstrapSigningIdentityMock,
+  getSigningIdentity: getSigningIdentityMock,
+}));
 
 const legacySurveyRow = {
   id: 'survey_1',
@@ -57,12 +63,16 @@ describe('scripts/import-legacy', () => {
     listAttestationsMock.mockReset().mockResolvedValue([]);
     createAttestationMock.mockReset().mockResolvedValue({ id: 'att_new' });
     signMock.mockReset().mockResolvedValue({ signature: 'sig-hex' });
+    bootstrapSigningIdentityMock.mockReset().mockResolvedValue(undefined);
+    getSigningIdentityMock.mockReset().mockReturnValue({
+      appDid: 'did:imajin:dykil-app',
+      privateKey: 'deadbeef',
+      publicKey: 'pub-hex',
+    });
 
     process.env.LEGACY_DATABASE_URL = 'postgres://legacy';
     process.env.MEDIA_SERVICE_URL = 'https://dev-jin.imajin.ai/media';
     process.env.AUTH_SERVICE_URL = 'https://dev-jin.imajin.ai/auth';
-    process.env.IMAJIN_APP_DID = 'did:imajin:dykil-app';
-    process.env.DYKIL_APP_PRIVATE_KEY = 'deadbeef';
   });
 
   it('throws when LEGACY_DATABASE_URL is not set', async () => {
@@ -83,10 +93,13 @@ describe('scripts/import-legacy', () => {
     expect(fetchWasCalledForAssetUpload()).toBe(false);
   });
 
-  it('requires the app keypair to --commit', async () => {
-    delete process.env.DYKIL_APP_PRIVATE_KEY;
+  it('requires a fetchable signing key to --commit', async () => {
+    bootstrapSigningIdentityMock.mockRejectedValue(
+      new Error("loadAppSigningKey: no keystore found and no claim code provided — first boot requires IMAJIN_APP_CLAIM_CODE"),
+    );
     const { runImport } = await import('../import-legacy');
-    await expect(runImport(['--commit'])).rejects.toThrow('DYKIL_APP_PRIVATE_KEY');
+    await expect(runImport(['--commit'])).rejects.toThrow('IMAJIN_APP_CLAIM_CODE');
+    expect(getSigningIdentityMock).not.toHaveBeenCalled();
   });
 
   it("--commit emits a NODE-WITNESSED LEGACY-IMPORT attestation, signed by the app's own DID, never the kernel's", async () => {

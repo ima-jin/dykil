@@ -1,9 +1,12 @@
 # Registering this app with the kernel
 
 Per ima-jin/imajin-ai#1990, the kernel refuses to serve an unregistered app: every app is an
-identity — a row in the kernel's app registry — before it can compose the platform. This app
-**refuses to start** without `IMAJIN_APP_DID` set (see `instrumentation.ts`), so registration
-is the first thing a fork must do, before `pnpm dev`.
+identity — a row in the kernel's app registry — before it can compose the platform. Per
+ima-jin/imajin-ai#2411 (ruled b by Ryan, 2026-09-27), this app also never holds a raw private
+key in an env file: it **refuses to start** without a signing key it can fetch itself via
+`@ima-jin/auth-client`'s `loadAppSigningKey()` (see `instrumentation.ts` and
+`src/lib/auth/signing-identity.ts`), so registration + a kernel operator's `apps.provision`
+approval are the first things a fork needs, before `pnpm dev`.
 
 ## 1. Register (self-service)
 
@@ -29,22 +32,36 @@ Response (`201`):
   "ownerDid": "did:imajin:...",
   "name": "dykil",
   "appDid": "did:imajin:...",
-  "publicKey": "...",
   "callbackUrl": "https://dykil.imajin.ai/api/auth/callback",
   "requestedScopes": [],
   "tier": "third_party",
   "allowedRedirectHosts": ["https://dykil.imajin.ai"],
-  "status": "active",
-  "keypair": { "privateKey": "...", "publicKey": "..." }
+  "status": "active"
 }
 ```
 
-`keypair` is only present when you didn't supply your own `publicKey` — it is shown **once** and
-never stored by the kernel. Save `keypair.privateKey` as `DYKIL_APP_PRIVATE_KEY` — this app uses
-its own key only to self-sign NODE-WITNESSED LEGACY-IMPORT attestations
-(`scripts/import-legacy.ts`), never on behalf of a respondent. Never commit it.
+This step only mints the app's identity (its `appDid` and registry `id`) — it does **not** hand
+back a private key. The app's actual signing key stays in the kernel's vault until a kernel
+operator grants it in step 2.
 
-## 2. Fields, and what they mean for this app
+## 2. Grant this app a signing key (`apps.provision`, operator-side)
+
+A kernel operator approves `apps.provision` on the `/jin` dashboard, which mints this app's
+Ed25519 signing key **in the vault** and grants it to this app's own DID — never handing the
+plaintext key to a human. That approval's response surfaces a one-time, ~15-minute **claim
+code** exactly once (`data.claimCode` on the `/jin` decision card). Copy it immediately —
+it cannot be retrieved again; if it's lost or expires unused, the operator re-approves
+`apps.provision` with `reissueClaim: true` for a fresh one.
+
+On this app's own first boot, `loadAppSigningKey()` mints its own Ed25519 "bootstrap" keypair,
+exchanges the claim code plus that keypair's public half for the real signing key via
+`POST /api/apps/claim`, and persists ONLY the bootstrap keypair (never the signing key) in a
+local keystore file. Every later boot re-authenticates with that persisted bootstrap key via
+`POST /api/apps/signing-key/fetch` — no claim code spent, no operator action needed. See
+[`packages/auth-client`'s README](https://github.com/ima-jin/imajin-ai/blob/main/packages/auth-client/README.md)
+upstream for the full mechanism.
+
+## 3. Fields, and what they mean for this app
 
 | Field | Meaning |
 |---|---|
@@ -55,22 +72,27 @@ its own key only to self-sign NODE-WITNESSED LEGACY-IMPORT attestations
 
 `id` (the `app_...` registry id, not the DID) is what you set as `NEXT_PUBLIC_IMAJIN_APP_ID`.
 
-## 3. Wire up this app
+## 4. Wire up this app
 
 ```bash
 cp .env.example .env.local
 # fill in:
-#   IMAJIN_APP_DID=<appDid from the response above>
-#   NEXT_PUBLIC_IMAJIN_APP_ID=<id from the response above>
-#   DYKIL_APP_PRIVATE_KEY=<keypair.privateKey from the response above>
+#   IMAJIN_KERNEL_URL=<kernel node>          (e.g. https://dev-jin.imajin.ai)
+#   IMAJIN_APP_DID=<appDid from step 1>
+#   NEXT_PUBLIC_IMAJIN_APP_ID=<id from step 1>
+#   IMAJIN_APP_CLAIM_CODE=<the one-time claim code from step 2 — first boot only>
 #   AUTH_SERVICE_URL=<kernel node>/auth      (e.g. https://dev-jin.imajin.ai/auth)
 #   MEDIA_SERVICE_URL=<kernel node>/media    (e.g. https://dev-jin.imajin.ai/media)
+# IMAJIN_APP_KEYSTORE is optional (defaults to ./.imajin/keystore.json) — never commit it
+# or the claim code; delete IMAJIN_APP_CLAIM_CODE from .env.local once boot succeeds once.
 ```
 
-Without `IMAJIN_APP_DID` set, `pnpm dev` / `pnpm start` throw immediately (`instrumentation.ts`)
-instead of serving requests no kernel call could ever authenticate.
+Without a signing key it can fetch via `loadAppSigningKey()`, `pnpm dev` / `pnpm start` throw
+immediately (`instrumentation.ts`) instead of serving requests no kernel call could ever
+authenticate — and it fails just as loudly if a raw `DYKIL_APP_PRIVATE_KEY` is still set,
+since this app never reads a private key from env.
 
-## 4. Register the response-attestation types (one-time, before going live)
+## 5. Register the response-attestation types (one-time, before going live)
 
 This app's responses are attestations of two app-namespaced types (see
 `src/lib/response-attestation.ts`), which must be registered once under the developer DID's own
@@ -92,7 +114,7 @@ This requires `requireEstablishedDID` (an established-tier identity) — use the
 that owns this app, not the app's own DID. See `ima-jin/imajin-ai`'s
 `app/auth/api/attestations/types/route.ts`.
 
-## 5. This app's own inbound auth (see AGENTS.md §8 and FINDINGS.md)
+## 6. This app's own inbound auth (see AGENTS.md §8 and FINDINGS.md)
 
 This app authenticates every inbound request through one interface, `authenticate()`
 (`src/lib/auth/authenticate.ts`), currently implemented with `requireSessionOrAppToken`
@@ -110,7 +132,7 @@ why this is an open call, not a settled one, and gap #2393 for why the KERNEL's 
 attestation write routes don't yet accept that same token — this app's own auth and the kernel
 calls it makes downstream are, today, two different trust boundaries.
 
-## 6. List or manage your apps later
+## 7. List or manage your apps later
 
 ```bash
 curl "${IMAJIN_AUTH_URL}/api/registry/apps?owner=me" \

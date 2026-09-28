@@ -17,13 +17,14 @@
  * node-witnessed attestations. Dry-run by default — pass --commit to
  * actually write.
  *
- * This app's OWN registered keypair (DYKIL_APP_PRIVATE_KEY / IMAJIN_APP_DID)
- * signs every emitted attestation, never the kernel's key and never a
- * respondent's — see src/lib/response-attestation.ts's provenance doc.
+ * This app's OWN signing key, fetched via `loadAppSigningKey()` (refs
+ * imajin-ai#2411 — never a raw private key out of an env file), signs every
+ * emitted attestation, never the kernel's key and never a respondent's —
+ * see src/lib/response-attestation.ts's provenance doc.
  */
 import { Client } from 'pg';
 import { sign } from '@ima-jin/auth';
-import { appDid, appPrivateKey } from '../src/lib/env';
+import { bootstrapSigningIdentity, getSigningIdentity } from '../src/lib/auth/signing-identity';
 import { canonicalResponsePayload } from '../src/lib/response-attestation';
 import { createAttestation, listAttestations } from '../src/lib/kernel/attestations';
 import { computeDocHash, SURVEY_DOC_SCHEMA, surveyFilename, type SurveyDoc } from '../src/lib/survey';
@@ -184,10 +185,16 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
     throw new Error('LEGACY_DATABASE_URL is not set — see .env.example.');
   }
 
-  const witnessDid = appDid();
-  const witnessPrivateKey = appPrivateKey();
-  if (commit && (!witnessDid || !witnessPrivateKey)) {
-    throw new Error("IMAJIN_APP_DID and DYKIL_APP_PRIVATE_KEY are required to --commit (self-signing, never the kernel's key).");
+  let witnessDid = '';
+  let witnessPrivateKey = '';
+  if (commit) {
+    // Fetches this app's own vault signing key (never the kernel's, never a
+    // respondent's) via loadAppSigningKey() — throws its own clear error on
+    // any failure (missing config, spent/expired claim code, revoked grant).
+    await bootstrapSigningIdentity();
+    const signingKey = getSigningIdentity();
+    witnessDid = signingKey.appDid;
+    witnessPrivateKey = signingKey.privateKey;
   }
 
   const client = new Client({ connectionString });
@@ -241,8 +248,8 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
         surveyOwnerDid: doc.ownerDid,
         surveyAssetId,
         doc,
-        witnessDid: witnessDid ?? '',
-        witnessPrivateKey: witnessPrivateKey ?? '',
+        witnessDid,
+        witnessPrivateKey,
         commit,
         alreadyImported,
       });

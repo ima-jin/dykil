@@ -23,8 +23,9 @@ file before touching code — it defines the boundary you must not cross and the
 
 1. Use this template.
 2. Register the app with the kernel — [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
-3. Set env: `cp .env.example .env.local` and fill it in (the app refuses to start without
-   `IMAJIN_APP_DID` — see `instrumentation.ts`).
+3. Set env: `cp .env.example .env.local` and fill it in (the app refuses to start without a
+   signing key it can fetch via `loadAppSigningKey()` — see `instrumentation.ts` and
+   `docs/REGISTRATION.md`; never a raw private key in the env file).
 4. This app owns no database — there is no migration step. See
    [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and `FINDINGS.md`.
 5. `pnpm dev`.
