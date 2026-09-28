@@ -1,3 +1,5 @@
+import { withBasePath } from '@/lib/base-path';
+
 export default function HomePage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
@@ -10,12 +12,12 @@ export default function HomePage() {
       </p>
       <ul className="mt-6 space-y-2 text-sm">
         <li>
-          <a className="text-amber-400 hover:underline" href="/api/health">
+          <a className="text-amber-400 hover:underline" href={withBasePath('/api/health')}>
             /api/health
           </a>
         </li>
         <li>
-          <a className="text-amber-400 hover:underline" href="/api/spec">
+          <a className="text-amber-400 hover:underline" href={withBasePath('/api/spec')}>
             /api/spec
           </a>
         </li>
