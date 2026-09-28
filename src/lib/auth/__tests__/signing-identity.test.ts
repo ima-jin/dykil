@@ -7,14 +7,15 @@ const ENV_KEYS = ['IMAJIN_KERNEL_URL', 'IMAJIN_APP_DID', 'IMAJIN_APP_CLAIM_CODE'
 const originalEnv: Record<string, string | undefined> = {};
 
 /**
- * These tests exercise the REAL `@ima-jin/auth-client` `loadAppSigningKey()`
- * (never mocked) through this app's own thin wrapper, mocking only the
- * kernel's HTTP surface — so a wrong env var name or a wrong keystore path
- * would fail these tests exactly as it would fail a real boot.
+ * Registers the shared temp-keystore env setup/teardown for a `describe`
+ * block via `beforeEach`/`afterEach` (call this at the top of the
+ * `describe` callback, same as writing the hooks inline) and returns an
+ * accessor for the current test's keystore path. Shared by both describe
+ * blocks below to avoid duplicating this setup verbatim.
  */
-describe('src/lib/auth/signing-identity', () => {
-  let keystoreDir: string;
-  let keystorePath: string;
+function useKeystoreEnv(tmpPrefix: string): { keystorePath: () => string } {
+  let keystoreDir = '';
+  let keystorePath = '';
 
   beforeEach(() => {
     vi.resetModules();
@@ -22,7 +23,7 @@ describe('src/lib/auth/signing-identity', () => {
       originalEnv[key] = process.env[key];
       delete process.env[key];
     }
-    keystoreDir = mkdtempSync(join(tmpdir(), 'dykil-keystore-'));
+    keystoreDir = mkdtempSync(join(tmpdir(), tmpPrefix));
     keystorePath = join(keystoreDir, 'keystore.json');
     process.env.IMAJIN_KERNEL_URL = 'https://dev-jin.imajin.ai';
     process.env.IMAJIN_APP_KEYSTORE = keystorePath;
@@ -36,6 +37,18 @@ describe('src/lib/auth/signing-identity', () => {
     rmSync(keystoreDir, { recursive: true, force: true });
     vi.unstubAllGlobals();
   });
+
+  return { keystorePath: () => keystorePath };
+}
+
+/**
+ * These tests exercise the REAL `@ima-jin/auth-client` `loadAppSigningKey()`
+ * (never mocked) through this app's own thin wrapper, mocking only the
+ * kernel's HTTP surface — so a wrong env var name or a wrong keystore path
+ * would fail these tests exactly as it would fail a real boot.
+ */
+describe('src/lib/auth/signing-identity', () => {
+  const env = useKeystoreEnv('dykil-keystore-');
 
   it('first boot: redeems the claim code for the signing key and persists a bootstrap keystore', async () => {
     process.env.IMAJIN_APP_CLAIM_CODE = 'one-time-code';
@@ -55,8 +68,8 @@ describe('src/lib/auth/signing-identity', () => {
     expect(url).toBe('https://dev-jin.imajin.ai/api/apps/claim');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toMatchObject({ claimCode: 'one-time-code' });
-    expect(existsSync(keystorePath)).toBe(true);
-    expect(statSync(keystorePath).mode & 0o777).toBe(0o600);
+    expect(existsSync(env.keystorePath())).toBe(true);
+    expect(statSync(env.keystorePath()).mode & 0o777).toBe(0o600);
   });
 
   it('second boot: signs a fresh challenge with the persisted bootstrap key, spending no claim code', async () => {
@@ -122,29 +135,7 @@ describe('src/lib/auth/signing-identity', () => {
 });
 
 describe('src/lib/auth/signing-identity — claimWithCode', () => {
-  let keystoreDir: string;
-  let keystorePath: string;
-
-  beforeEach(() => {
-    vi.resetModules();
-    for (const key of ENV_KEYS) {
-      originalEnv[key] = process.env[key];
-      delete process.env[key];
-    }
-    keystoreDir = mkdtempSync(join(tmpdir(), 'dykil-claim-page-'));
-    keystorePath = join(keystoreDir, 'keystore.json');
-    process.env.IMAJIN_KERNEL_URL = 'https://dev-jin.imajin.ai';
-    process.env.IMAJIN_APP_KEYSTORE = keystorePath;
-  });
-
-  afterEach(() => {
-    for (const key of ENV_KEYS) {
-      if (originalEnv[key] === undefined) delete process.env[key];
-      else process.env[key] = originalEnv[key];
-    }
-    rmSync(keystoreDir, { recursive: true, force: true });
-    vi.unstubAllGlobals();
-  });
+  const env = useKeystoreEnv('dykil-claim-page-');
 
   it('hot-swaps the in-memory signing identity and persists a bootstrap keystore, without needing IMAJIN_APP_CLAIM_CODE', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
@@ -162,7 +153,7 @@ describe('src/lib/auth/signing-identity — claimWithCode', () => {
     expect(identity.appDid).toBe('did:imajin:dykil-app');
     expect(isAppClaimed()).toBe(true);
     expect(getSigningIdentity()).toEqual(identity);
-    expect(existsSync(keystorePath)).toBe(true);
-    expect(statSync(keystorePath).mode & 0o777).toBe(0o600);
+    expect(existsSync(env.keystorePath())).toBe(true);
+    expect(statSync(env.keystorePath()).mode & 0o777).toBe(0o600);
   });
 });
