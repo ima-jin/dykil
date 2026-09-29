@@ -156,4 +156,20 @@ describe('src/lib/auth/signing-identity — claimWithCode', () => {
     expect(existsSync(env.keystorePath())).toBe(true);
     expect(statSync(env.keystorePath()).mode & 0o777).toBe(0o600);
   });
+
+  it('refuses a claim whose kernel-returned appDid does not match IMAJIN_APP_DID, and undoes the keystore write', async () => {
+    process.env.IMAJIN_APP_DID = 'did:imajin:this-app';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ appDid: 'did:imajin:a-different-app', privateKey: 'deadbeef', publicKey: 'pub-hex' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { AppDidMismatchError, claimWithCode, isAppClaimed } = await import('../signing-identity');
+
+    await expect(claimWithCode({ claimCode: 'operator-pasted-code' })).rejects.toThrow(AppDidMismatchError);
+
+    expect(isAppClaimed()).toBe(false);
+    expect(existsSync(env.keystorePath())).toBe(false);
+  });
 });

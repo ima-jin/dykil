@@ -22,6 +22,7 @@
  * which call `claimWithCode()` below). A *real* failure — a claim code that
  * IS provided but the kernel refuses, a network error, … — still throws.
  */
+import { rmSync } from 'node:fs';
 import {
   loadAppSigningKey,
   readKeystore,
@@ -81,15 +82,51 @@ export interface ClaimWithCodeParams {
 }
 
 /**
+ * Thrown by `claimWithCode()` when the kernel redeemed the code for a
+ * DIFFERENT app than this one (`IMAJIN_APP_DID`) — e.g. an operator pasted
+ * a code copied from a sibling app's `/jin` card. Never carries key
+ * material: both fields are public DIDs, safe to log or return to a caller.
+ */
+export class AppDidMismatchError extends Error {
+  constructor(
+    public readonly expectedAppDid: string,
+    public readonly claimedAppDid: string
+  ) {
+    super(
+      `claimWithCode: kernel redeemed this code for '${claimedAppDid}', but this app is '${expectedAppDid}' — refusing to adopt a foreign identity`
+    );
+    this.name = 'AppDidMismatchError';
+  }
+}
+
+/**
  * Redeems a one-time claim code submitted through the operator `/claim`
  * page (`app/api/claim/route.ts`) — the browser-paste path imajin-ai#2427
  * adds alongside the existing `IMAJIN_APP_CLAIM_CODE` env-var path. Hot-
  * swaps this process's in-memory signing identity immediately — no restart
  * required, though a restart also works (it just re-reads the now-present
  * keystore).
+ *
+ * Verifies the kernel's returned `appDid` against this app's own
+ * `IMAJIN_APP_DID` (when set) before adopting it — a claim code pasted from
+ * a DIFFERENT app's `/jin` card would otherwise hot-swap this process to a
+ * foreign identity that the next restart's bootstrap-key fetch can never
+ * re-authenticate as. `loadAppSigningKey()` itself already persisted the
+ * bootstrap keystore as a side effect of the successful kernel exchange by
+ * the time we see the mismatch here (see its own docblock: written right
+ * after a successful redemption, before returning) — that write is undone
+ * below so a foreign-app claim never leaves a keystore behind, and the
+ * in-memory identity is never swapped.
  */
 export async function claimWithCode(params: ClaimWithCodeParams): Promise<AppSigningKey> {
   const identity = await loadAppSigningKey({ claimCode: params.claimCode, hostHint: params.hostHint });
+
+  const expectedAppDid = process.env.IMAJIN_APP_DID;
+  if (expectedAppDid && identity.appDid !== expectedAppDid) {
+    rmSync(resolveKeystorePath(process.env.IMAJIN_APP_KEYSTORE), { force: true });
+    throw new AppDidMismatchError(expectedAppDid, identity.appDid);
+  }
+
   signingIdentity = identity;
   return identity;
 }
