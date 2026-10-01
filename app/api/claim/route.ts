@@ -25,19 +25,16 @@ interface ClaimRequestBody {
 
 /**
  * Resolves the caller's address to key the rate limiter on. Trusts only the
- * hop OUR OWN front-door reverse proxy appends — `x-real-ip` when the proxy
- * sets it, else the LAST `x-forwarded-for` hop — never the first: an
- * attacker controls every hop before the proxy's own, including the first
- * one a naive reader would reach for, and can bypass a per-key limit
- * entirely just by sending a fresh fabricated leading hop on every request.
+ * LAST `x-forwarded-for` hop — the one OUR OWN front-door reverse proxy
+ * appends — never the first: an attacker controls every hop before the
+ * proxy's own, including the first one a naive reader would reach for, and
+ * can bypass a per-key limit entirely just by sending a fresh fabricated
+ * leading hop on every request. `x-real-ip` is deliberately NOT consulted: the
+ * proxy does not overwrite it, so it is fully client-controlled.
  * Falls back to `UNKNOWN_CLIENT_KEY` (its own, separately-capped bucket —
- * see `claim-rate-limit.ts`) when neither header is present at all.
+ * see `claim-rate-limit.ts`) when `x-forwarded-for` is absent or empty.
  */
 function clientKeyFor(request: NextRequest): string {
-  const realIp = request.headers.get('x-real-ip')?.trim();
-  if (realIp) {
-    return realIp;
-  }
   const forwardedFor = request.headers.get('x-forwarded-for');
   if (forwardedFor) {
     const hops = forwardedFor

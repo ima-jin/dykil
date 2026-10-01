@@ -124,21 +124,23 @@ describe('POST /api/claim', () => {
     expect(response.status).toBe(429);
   });
 
-  it('prefers x-real-ip over x-forwarded-for when both are present', async () => {
+  it('ignores a spoofed x-real-ip and a spoofed leading X-Forwarded-For hop: neither bypasses the limit', async () => {
     mockKernelClaim({ error: 'Unrecognized claim code' }, false);
 
+    // Fresh attacker-controlled x-real-ip AND leading XFF hop on every
+    // request; only the trailing XFF hop (the proxy's) is constant.
     for (let attempt = 0; attempt < RATE_LIMIT; attempt += 1) {
       await POST(
         postRequest(
           { claimCode: `attempt-${attempt}` },
-          { 'x-real-ip': '198.51.100.7', 'x-forwarded-for': `10.0.0.${attempt}` }
+          { 'x-real-ip': `198.51.100.${attempt}`, 'x-forwarded-for': `10.0.0.${attempt}, 203.0.113.5` }
         ) as never
       );
     }
     const response = await POST(
       postRequest(
         { claimCode: 'one-attempt-too-many' },
-        { 'x-real-ip': '198.51.100.7', 'x-forwarded-for': '10.0.0.99' }
+        { 'x-real-ip': '198.51.100.99', 'x-forwarded-for': '10.0.0.99, 203.0.113.5' }
       ) as never
     );
 
