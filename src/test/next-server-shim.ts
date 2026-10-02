@@ -13,6 +13,11 @@
  * `Response` (native in Node 18+), sidesteps that entirely — it's aliased in
  * for tests only (`vitest.config.ts`); the real app always uses the genuine
  * `next/server` at runtime via Next.js itself.
+ *
+ * `NextResponse.next()` (imajin-ai#2427) was added alongside `middleware.ts`,
+ * which is the first consumer of it — mirrors real Next.js's own behavior
+ * (a pass-through response carrying the `x-middleware-next: '1'` marker
+ * header) closely enough for `__tests__/middleware.test.ts` to assert on it.
  */
 export class NextRequest extends Request {
   readonly nextUrl: URL;
@@ -30,5 +35,11 @@ export class NextResponse extends Response {
       headers.set('content-type', 'application/json');
     }
     return new NextResponse(JSON.stringify(body), { ...init, headers });
+  }
+
+  static next(init?: ResponseInit): NextResponse {
+    const response = new NextResponse(null, init);
+    response.headers.set('x-middleware-next', '1');
+    return response;
   }
 }
