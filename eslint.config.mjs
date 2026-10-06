@@ -14,6 +14,11 @@ const eslintConfig = [
   {
     ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts', 'coverage/**'],
   },
+  {
+    // pm2 loads ecosystem.config.cjs as CommonJS, so `require` is the only option there.
+    files: ['**/*.cjs'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
 ];
 
 export default eslintConfig;

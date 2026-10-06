@@ -48,6 +48,23 @@ genuine respondent-signed ones in the data, and never upgraded.
    intact). Locally: `http://localhost:3101/dykil` — `/dykil/api/health` and `/dykil/api/spec`
    respond immediately.
 
+## Deploying (prod + dev)
+
+One command per environment, from that environment's checkout on the server — see
+[`docs/DEPLOY.md`](./docs/DEPLOY.md):
+
+```bash
+scripts/deploy.sh dev     # pm2 dev-dykil,  port 3101, https://dev-jin.imajin.ai/dykil
+scripts/deploy.sh prod    # pm2 prod-dykil, port 7101, https://jin.imajin.ai/dykil
+```
+
+- **Identity:** each environment claims its own app identity through the kernel's claim flow — the operator
+  runbook is in [`docs/REGISTRATION.md`](./docs/REGISTRATION.md#operator-runbook-prod-and-dev). Nothing here mints keys.
+- **Migration baseline:** there are no migrations. Every deploy runs a read-only, idempotent check of the legacy
+  `dykil.*` schema and data that refuses on mismatch and never writes — [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+- **Env:** `.env.example` (local), `.env.dev.example`, `.env.prod.example`; every variable is documented in
+  [`docs/ENVIRONMENTS.md`](./docs/ENVIRONMENTS.md) and validated by `node scripts/check-env.mjs <dev|prod>`.
+
 ## The routes
 
 | Route | What |

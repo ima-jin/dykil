@@ -26,8 +26,9 @@ file before touching code — it defines the boundary you must not cross and the
 3. Set env: `cp .env.example .env.local` and fill it in (the app refuses to start without a
    signing key it can fetch via `loadAppSigningKey()` — see `instrumentation.ts` and
    `docs/REGISTRATION.md`; never a raw private key in the env file).
-4. This app owns no database — there is no migration step. See
-   [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and `FINDINGS.md`.
+4. This app owns no database — there is no migration step; deploys run a read-only legacy baseline instead
+   ([`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)). See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and
+   `FINDINGS.md`. To deploy dev or prod: [`docs/DEPLOY.md`](./docs/DEPLOY.md) (`scripts/deploy.sh <dev|prod>`).
 5. `pnpm dev`.
 
 ---
@@ -201,7 +202,10 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
   (`src/lib/auth/authenticate.ts`, currently `requireSessionOrAppToken`). The kernel can't grant
   them yet — see imajin-ai#2663. The app otherwise relies on the caller's own DID + the kernel's
   own authorization checks on each downstream call, forwarding the caller's credentials.
-- **Domain:** dykil.imajin.ai (pm2 entry `dykil`, Caddy route unchanged per #1985).
+- **Domain:** dykil.imajin.ai (Caddy route unchanged per #1985). Deployed as pm2 `prod-dykil` (port 7101,
+  `jin.imajin.ai/dykil`) and `dev-dykil` (port 3101, `dev-jin.imajin.ai/dykil`) — `docs/DEPLOY.md`. Identity is
+  claimed separately per environment — `docs/REGISTRATION.md`, "Operator runbook". Env contract:
+  `docs/ENVIRONMENTS.md`.
 - **The real-world loop it instruments:** a survey owner → a respondent: the owner publishes
   a signed survey document, the respondent signs and submits an attestation answering it.
   No paid leg.
