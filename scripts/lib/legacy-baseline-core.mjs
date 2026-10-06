@@ -238,9 +238,10 @@ async function compareData(client) {
     ['badFields', [], 'survey(s) have a `fields` value that is not a JSON object'],
     ['badAnswers', [], 'survey_responses row(s) have an `answers` value that is not a JSON object'],
   ];
-  for (const [name, params, message] of checks) {
-    const [{ n }] = await rows(client, name, params);
-    if (n > 0) problems.push(`${n} ${message}.`);
+  // One connection, so the driver runs these in order; Promise.all keeps the report order.
+  const counts = await Promise.all(checks.map(async ([name, params]) => (await rows(client, name, params))[0].n));
+  for (const [index, n] of counts.entries()) {
+    if (n > 0) problems.push(`${n} ${checks[index][2]}.`);
   }
   return problems;
 }
