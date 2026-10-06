@@ -15,7 +15,7 @@ interface RouteParams {
   params: Promise<{ id: string; responseId: string }>;
 }
 
-export async function OPTIONS(request: NextRequest) {
+export function OPTIONS(request: NextRequest) {
   return corsOptions(request);
 }
 

@@ -2,18 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { collectPages } from '../paginate';
 
 describe('collectPages', () => {
-  it('follows next until it is null, starting from a null cursor', async () => {
+  it('follows next until it is undefined, starting from no cursor', async () => {
     const fetchPage = vi
       .fn()
       .mockResolvedValueOnce({ items: [1, 2], next: 'b' })
-      .mockResolvedValueOnce({ items: [3], next: null });
+      .mockResolvedValueOnce({ items: [3], next: undefined });
 
     expect(await collectPages<number, string>(fetchPage, 10)).toEqual([1, 2, 3]);
-    expect(fetchPage.mock.calls.map(([cursor]) => cursor)).toEqual([null, 'b']);
+    expect(fetchPage.mock.calls.map(([cursor]) => cursor)).toEqual([undefined, 'b']);
   });
 
-  it('returns a single page when next is null immediately', async () => {
-    const fetchPage = vi.fn().mockResolvedValue({ items: ['only'], next: null });
+  it('returns a single page when next is undefined immediately', async () => {
+    const fetchPage = vi.fn().mockResolvedValue({ items: ['only'], next: undefined });
     expect(await collectPages<string, number>(fetchPage, 10)).toEqual(['only']);
     expect(fetchPage).toHaveBeenCalledTimes(1);
   });

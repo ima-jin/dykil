@@ -160,8 +160,8 @@ export async function listAllAttestations(
   callerHeaders?: HeadersInit,
 ): Promise<KernelAttestation[]> {
   return collectPages<KernelAttestation, string>(async (cursor) => {
-    const page = await listAttestationsPage({ ...params, before: cursor ?? undefined }, callerHeaders);
-    return { items: page.rows, next: page.nextCursor };
+    const page = await listAttestationsPage({ ...params, before: cursor }, callerHeaders);
+    return { items: page.rows, next: page.nextCursor ?? undefined };
   }, LIST_ALL_MAX_PAGES);
 }
 

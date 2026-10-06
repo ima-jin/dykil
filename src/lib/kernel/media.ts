@@ -140,8 +140,7 @@ const SURVEY_LIST_MAX_PAGES = 25;
  * no filename convention is involved. Pages by `offset` until a short page.
  */
 export async function listMySurveyAssets(request: Request): Promise<KernelAsset[]> {
-  return collectPages<KernelAsset, number>(async (offset) => {
-    const start = offset ?? 0;
+  return collectPages<KernelAsset, number>(async (start = 0) => {
     const url = new URL(`${mediaServiceUrl()}/api/assets`);
     url.searchParams.set('context_app', DYKIL_MEDIA_CONTEXT_APP);
     url.searchParams.set('context_feature', DYKIL_MEDIA_CONTEXT_FEATURE);
@@ -150,6 +149,6 @@ export async function listMySurveyAssets(request: Request): Promise<KernelAsset[
     const response = await fetch(url, { headers: forwardedIdentityHeaders(request), cache: 'no-store' });
     const body = (await parseJsonOrThrow(response)) as { assets: KernelAsset[] };
     const full = body.assets.length >= SURVEY_LIST_PAGE_SIZE;
-    return { items: body.assets, next: full ? start + SURVEY_LIST_PAGE_SIZE : null };
+    return { items: body.assets, next: full ? start + SURVEY_LIST_PAGE_SIZE : undefined };
   }, SURVEY_LIST_MAX_PAGES);
 }
