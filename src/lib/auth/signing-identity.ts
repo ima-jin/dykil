@@ -9,8 +9,8 @@
  * locally persisted bootstrap keypair (never the signing key itself)
  * re-authenticates every later boot. See docs/REGISTRATION.md.
  *
- * Memory-only: the signing key returned here is cached in this module's own
- * process memory and never written to disk, another env var, or a log
+ * Memory-only: the signing key returned here is cached in process memory
+ * (on `globalThis`, see `SIGNING_IDENTITY_KEY` below) and never written to disk, another env var, or a log
  * line — only `loadAppSigningKey()`'s own narrow-purpose bootstrap keystore
  * file touches disk.
  *
@@ -30,7 +30,29 @@ import {
   type AppSigningKey,
 } from '@ima-jin/auth-client';
 
-let signingIdentity: AppSigningKey | null = null;
+/**
+ * The identity lives on `globalThis` under a `Symbol.for(...)` key — NOT in a
+ * module-level variable. Next.js bundles `instrumentation.ts` (which calls
+ * `bootstrapSigningIdentity()` at boot) separately from the app-route
+ * bundles, so each gets its own copy of this module; a plain module
+ * variable set at boot would never be seen by routes after a restart.
+ * `Symbol.for` returns the same symbol across every bundle copy, so all of
+ * them share one slot. The symbol-keyed slot is not enumerable by string
+ * key and is never serialised.
+ */
+const SIGNING_IDENTITY_KEY = Symbol.for('imajin.app.signingIdentity');
+
+interface SigningIdentityStore {
+  [SIGNING_IDENTITY_KEY]?: AppSigningKey | null;
+}
+
+function readSigningIdentity(): AppSigningKey | null {
+  return (globalThis as SigningIdentityStore)[SIGNING_IDENTITY_KEY] ?? null;
+}
+
+function writeSigningIdentity(identity: AppSigningKey | null): void {
+  (globalThis as SigningIdentityStore)[SIGNING_IDENTITY_KEY] = identity;
+}
 
 /**
  * True once this app has a real, vault-minted signing identity in memory —
@@ -38,7 +60,7 @@ let signingIdentity: AppSigningKey | null = null;
  * hot-swap. False in unclaimed boot mode (imajin-ai#2427).
  */
 export function isAppClaimed(): boolean {
-  return signingIdentity !== null;
+  return readSigningIdentity() !== null;
 }
 
 /**
@@ -61,11 +83,12 @@ export async function bootstrapSigningIdentity(): Promise<void> {
   if (!hasClaimMaterial()) {
     return;
   }
-  signingIdentity = await loadAppSigningKey();
+  writeSigningIdentity(await loadAppSigningKey());
 }
 
 /** Returns the cached signing key. Throws if called before `bootstrapSigningIdentity()` or `claimWithCode()` has succeeded. */
 export function getSigningIdentity(): AppSigningKey {
+  const signingIdentity = readSigningIdentity();
   if (!signingIdentity) {
     throw new Error(
       'Signing identity not bootstrapped yet — call bootstrapSigningIdentity() first, or this app has not been claimed yet (see /claim).'
@@ -127,11 +150,11 @@ export async function claimWithCode(params: ClaimWithCodeParams): Promise<AppSig
     throw new AppDidMismatchError(expectedAppDid, identity.appDid);
   }
 
-  signingIdentity = identity;
+  writeSigningIdentity(identity);
   return identity;
 }
 
 /** Test-only: clears the in-memory signing identity between test cases. */
 export function resetSigningIdentityForTests(): void {
-  signingIdentity = null;
+  writeSigningIdentity(null);
 }

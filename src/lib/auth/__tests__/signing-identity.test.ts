@@ -5,6 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ENV_KEYS = ['IMAJIN_KERNEL_URL', 'IMAJIN_APP_DID', 'IMAJIN_APP_CLAIM_CODE', 'IMAJIN_APP_KEYSTORE'] as const;
 const originalEnv: Record<string, string | undefined> = {};
+const SIGNING_IDENTITY_KEY = Symbol.for('imajin.app.signingIdentity');
+
+interface GlobalIdentitySlot {
+  [SIGNING_IDENTITY_KEY]?: unknown;
+}
+
+/** The identity now lives on `globalThis`, so it must be cleared explicitly between cases. */
+function clearGlobalIdentity(): void {
+  delete (globalThis as GlobalIdentitySlot)[SIGNING_IDENTITY_KEY];
+}
 
 /**
  * Registers the shared temp-keystore env setup/teardown for a `describe`
@@ -19,6 +29,7 @@ function useKeystoreEnv(tmpPrefix: string): { keystorePath: () => string } {
 
   beforeEach(() => {
     vi.resetModules();
+    clearGlobalIdentity();
     for (const key of ENV_KEYS) {
       originalEnv[key] = process.env[key];
       delete process.env[key];
@@ -30,6 +41,7 @@ function useKeystoreEnv(tmpPrefix: string): { keystorePath: () => string } {
   });
 
   afterEach(() => {
+    clearGlobalIdentity();
     for (const key of ENV_KEYS) {
       if (originalEnv[key] === undefined) delete process.env[key];
       else process.env[key] = originalEnv[key];
@@ -126,6 +138,40 @@ describe('src/lib/auth/signing-identity', () => {
 
     await expect(bootstrapSigningIdentity()).rejects.toThrow();
     expect(isAppClaimed()).toBe(false);
+  });
+
+  it('shares the identity across separately-loaded module copies (instrumentation.ts vs route bundles)', async () => {
+    const fixtureIdentity = { appDid: 'did:imajin:dykil-app', privateKey: 'fixture-private', publicKey: 'fixture-public' };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => fixtureIdentity });
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.IMAJIN_APP_CLAIM_CODE = 'one-time-code';
+
+    // Copy A stands in for the bundle `instrumentation.ts` boots from...
+    const instrumentationCopy = await import('../signing-identity');
+    await instrumentationCopy.bootstrapSigningIdentity();
+
+    // ...copy B for a distinct route bundle: a fresh module instance with its own module scope.
+    vi.resetModules();
+    const routeCopy = await import('../signing-identity');
+    expect(routeCopy).not.toBe(instrumentationCopy);
+
+    expect(routeCopy.isAppClaimed()).toBe(true);
+    expect(routeCopy.getSigningIdentity()).toEqual(fixtureIdentity);
+  });
+
+  it('reads the identity from the Symbol.for(imajin.app.signingIdentity) slot on globalThis', async () => {
+    const fixtureIdentity = { appDid: 'did:imajin:dykil-app', privateKey: 'fixture-private', publicKey: 'fixture-public' };
+    const { getSigningIdentity, isAppClaimed, resetSigningIdentityForTests } = await import('../signing-identity');
+    expect(isAppClaimed()).toBe(false);
+
+    (globalThis as GlobalIdentitySlot)[SIGNING_IDENTITY_KEY] = fixtureIdentity;
+
+    expect(isAppClaimed()).toBe(true);
+    expect(getSigningIdentity()).toBe(fixtureIdentity);
+
+    resetSigningIdentityForTests();
+    expect(isAppClaimed()).toBe(false);
+    expect((globalThis as GlobalIdentitySlot)[SIGNING_IDENTITY_KEY]).toBeNull();
   });
 
   it('getSigningIdentity throws before bootstrapSigningIdentity() has succeeded', async () => {
