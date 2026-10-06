@@ -57,12 +57,16 @@ genuine respondent-signed ones in the data, and never upgraded.
 | `GET /claim` | operator-facing claim page (unclaimed boot mode only, imajin-ai#2427) |
 | `POST /api/claim` | redeem this app's one-time claim code (unclaimed boot mode only) |
 | `POST /api/surveys` | create a survey (a signed media-asset document) |
-| `GET /api/surveys/mine` | list the caller's own surveys |
+| `GET /api/surveys`, `GET /api/surveys/mine` | list the caller's own surveys |
 | `GET /api/surveys/handle/:handle` | published surveys by handle (unimplemented stub — no public handle→DID resolver exists; see `FINDINGS.md`) |
 | `GET/PUT/DELETE /api/surveys/:id` | read (public if published), update/delete (owner only) |
-| `POST /api/surveys/:id/respond` | submit a respondent-signed response (an attestation) |
-| `GET /api/surveys/:id/responses` | all responses for a survey, as attestations (owner only) |
+| `POST /api/surveys/:id/respond` | submit a respondent-signed response (an attestation); `supersedes` edits your earlier one |
+| `GET /api/surveys/:id/responses` | the survey's responses, as attestations (owner only; cursor-paged export) |
 | `GET /api/surveys/:id/responses/check` | has the caller (or a given ticket) already responded — replaces the original `responses/by-ticket/:ticketId` row read |
+| `DELETE /api/surveys/:id/responses/:responseId` | withdraw your own response (kernel revoke) |
+
+Read routes need the `dykil:read` token scope, mutating routes `dykil:write`. Every response is signed;
+there is no anonymous path (imajin-ai#2536).
 
 ## Auth
 
@@ -93,7 +97,9 @@ src/
   lib/
     survey.ts             <- survey document model + validation
     response-attestation.ts <- response payload shape (respondent-signed vs node-witnessed)
-    ticket-gate.ts         <- the composable ticket-holder gate (stubbed, see FINDINGS.md)
+    ticket-gate.ts         <- the composable ticket-holder gate (events app boolean)
+    events-gate-token.ts   <- mints the events:read token the gate needs
+    responses.ts           <- a survey's responses as attestations (context_id + cursor)
     kernel/
       media.ts             <- kernel media-service client (survey documents)
       attestations.ts      <- kernel auth-service client (responses)

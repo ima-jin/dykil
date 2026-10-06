@@ -26,8 +26,8 @@ import { Client } from 'pg';
 import { sign } from '@ima-jin/auth';
 import { bootstrapSigningIdentity, getSigningIdentity } from '../src/lib/auth/signing-identity';
 import { canonicalResponsePayload } from '../src/lib/response-attestation';
-import { createAttestation, listAttestations } from '../src/lib/kernel/attestations';
-import { computeDocHash, SURVEY_DOC_SCHEMA, surveyFilename, type SurveyDoc } from '../src/lib/survey';
+import { createAttestation, listAllAttestations } from '../src/lib/kernel/attestations';
+import { computeDocHash, normalizeSurveySettings, SURVEY_DOC_SCHEMA, surveyFilename, type SurveyDoc } from '../src/lib/survey';
 import { mediaServiceUrl } from '../src/lib/env';
 
 interface LegacySurveyRow {
@@ -75,6 +75,18 @@ async function fetchLegacyData(client: Client): Promise<{ surveys: LegacySurveyR
   return { surveys: surveys.rows, responses: responses.rows };
 }
 
+/**
+ * Legacy `settings` is an unvalidated jsonb column. Run it through the same
+ * normalizer the live routes use, so `allowAnonymous` is dropped (imajin-ai#2536,
+ * ruling c) — a legacy anonymous-enabled survey imports as a signed-only one —
+ * and fall back to no settings rather than failing the whole import on a
+ * malformed row.
+ */
+function toSurveySettings(raw: unknown): SurveyDoc['settings'] {
+  const normalized = normalizeSurveySettings(raw);
+  return 'settings' in normalized ? normalized.settings : {};
+}
+
 function toSurveyDoc(row: LegacySurveyRow): SurveyDoc {
   return {
     schema: SURVEY_DOC_SCHEMA,
@@ -82,7 +94,7 @@ function toSurveyDoc(row: LegacySurveyRow): SurveyDoc {
     title: row.title,
     description: row.description,
     fields: (row.fields ?? { elements: [] }) as SurveyDoc['fields'],
-    settings: (row.settings ?? {}) as SurveyDoc['settings'],
+    settings: toSurveySettings(row.settings),
     type: row.type as SurveyDoc['type'],
     status: row.status as SurveyDoc['status'],
     createdAt: row.created_at.toISOString(),
@@ -116,7 +128,7 @@ async function importSurveyDoc(row: LegacySurveyRow, commit: boolean): Promise<s
  * this script never double-imports the same legacy row.
  */
 async function fetchAlreadyImportedRefs(ownerDid: string): Promise<Set<string>> {
-  const existing = await listAttestations({ subjectDid: ownerDid, type: 'dykil/survey-response-legacy-import' });
+  const existing = await listAllAttestations({ subjectDid: ownerDid, type: 'dykil/survey-response-legacy-import' });
   const refs = new Set<string>();
   for (const attestation of existing) {
     const ref = attestation.payload?.legacyRowRef;
@@ -173,6 +185,8 @@ async function importResponseAttestation(params: {
     payload,
     signature: signed.signature,
     issuedAt,
+    // The legacy ticket id rides as the indexed ref, same as a live response (imajin-ai#2534).
+    ref: params.row.ticket_id,
   });
 
   return true;

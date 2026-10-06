@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { clientMock, listAttestationsMock, createAttestationMock, signMock, bootstrapSigningIdentityMock, getSigningIdentityMock } = vi.hoisted(() => ({
+const { clientMock, listAllAttestationsMock, createAttestationMock, signMock, bootstrapSigningIdentityMock, getSigningIdentityMock } = vi.hoisted(() => ({
   clientMock: {
     connect: vi.fn(),
     end: vi.fn(),
     query: vi.fn(),
   },
-  listAttestationsMock: vi.fn(),
+  listAllAttestationsMock: vi.fn(),
   createAttestationMock: vi.fn(),
   signMock: vi.fn(),
   bootstrapSigningIdentityMock: vi.fn(),
@@ -20,7 +20,7 @@ vi.mock('@ima-jin/auth', async () => {
 });
 vi.mock('../../src/lib/kernel/attestations', async () => {
   const actual = await vi.importActual<typeof import('../../src/lib/kernel/attestations')>('../../src/lib/kernel/attestations');
-  return { ...actual, listAttestations: listAttestationsMock, createAttestation: createAttestationMock };
+  return { ...actual, listAllAttestations: listAllAttestationsMock, createAttestation: createAttestationMock };
 });
 vi.mock('../../src/lib/auth/signing-identity', () => ({
   bootstrapSigningIdentity: bootstrapSigningIdentityMock,
@@ -60,7 +60,7 @@ describe('scripts/import-legacy', () => {
       if (sql.includes('dykil.survey_responses')) return Promise.resolve({ rows: [legacyResponseRow] });
       return Promise.resolve({ rows: [] });
     });
-    listAttestationsMock.mockReset().mockResolvedValue([]);
+    listAllAttestationsMock.mockReset().mockResolvedValue([]);
     createAttestationMock.mockReset().mockResolvedValue({ id: 'att_new' });
     signMock.mockReset().mockResolvedValue({ signature: 'sig-hex' });
     bootstrapSigningIdentityMock.mockReset().mockResolvedValue(undefined);
@@ -126,13 +126,58 @@ describe('scripts/import-legacy', () => {
     expect(attestationInput.payload.provenance).toBe('node-witnessed-legacy-import');
     expect(attestationInput.payload.legacyRowRef).toBe('dykil.survey_responses/survey_1/response_1');
     expect(attestationInput.payload.witnessedAt).toBe('2025-01-03T00:00:00.000Z');
+    expect(attestationInput.ref).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('carries a legacy ticket id as the indexed ref and drops allowAnonymous from the imported document', async () => {
+    clientMock.query.mockImplementation((sql: string) => {
+      if (sql.includes('dykil.surveys')) {
+        return Promise.resolve({ rows: [{ ...legacySurveyRow, settings: { allowAnonymous: true, multipleResponses: true } }] });
+      }
+      if (sql.includes('dykil.survey_responses')) {
+        return Promise.resolve({ rows: [{ ...legacyResponseRow, ticket_id: 'tkt_9' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { runImport } = await import('../import-legacy');
+    await runImport(['--commit']);
+
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    const uploaded = JSON.parse(await (form.get('file') as Blob).text());
+    expect(uploaded.settings).toEqual({ multipleResponses: true });
+
+    const [attestationInput] = createAttestationMock.mock.calls[0];
+    expect(attestationInput.ref).toBe('tkt_9');
+    expect(attestationInput.payload.ticketId).toBe('tkt_9');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('imports a survey whose legacy settings are malformed with no settings rather than failing', async () => {
+    clientMock.query.mockImplementation((sql: string) => {
+      if (sql.includes('dykil.surveys')) return Promise.resolve({ rows: [{ ...legacySurveyRow, settings: ['nope'] }] });
+      return Promise.resolve({ rows: [] });
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { runImport } = await import('../import-legacy');
+    await runImport(['--commit']);
+
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    expect(JSON.parse(await (form.get('file') as Blob).text()).settings).toEqual({});
 
     vi.unstubAllGlobals();
   });
 
   it('is idempotent: skips a legacy row whose legacyRowRef was already imported', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) }));
-    listAttestationsMock.mockResolvedValue([
+    listAllAttestationsMock.mockResolvedValue([
       { id: 'att_existing', payload: { legacyRowRef: 'dykil.survey_responses/survey_1/response_1' } },
     ]);
 

@@ -160,8 +160,10 @@ curl -X POST "${IMAJIN_AUTH_URL}/api/tokens/app" \
 ```
 
 and calls this app with `Authorization: Bearer <token>`. See `FINDINGS.md`'s DECISION card for
-why this is an open call, not a settled one, and gap #2393 for why the KERNEL's own media and
-attestation write routes don't yet accept that same token — this app's own auth and the kernel
+why this is an open call, not a settled one. The kernel's media routes accept a scoped app token
+(imajin-ai#2393) but verify it against their own audience and scopes, so a token minted for this app
+isn't accepted there, and `dykil:read` / `dykil:write` can't be granted yet — see
+[imajin-ai#2663](https://github.com/ima-jin/imajin-ai/issues/2663). This app's own auth and the kernel
 calls it makes downstream are, today, two different trust boundaries.
 
 ## 7. List or manage your apps later

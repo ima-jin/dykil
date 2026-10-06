@@ -80,7 +80,46 @@ describe('buildResponseAttestationInput', () => {
       payload: { provenance: 'respondent-signed', docHash: 'sha256:abc', answers: { q1: 'yes' }, ticketId: 'tkt_1' },
       signature: 'deadbeef',
       issuedAt: 1_700_000_000_000,
+      ref: 'tkt_1',
     });
+  });
+
+  it('uses the ticketId as the indexed ref, omits it when there is none, and lets an explicit ref win', () => {
+    const base = {
+      issuerDid: 'did:imajin:respondent',
+      surveyOwnerDid: 'did:imajin:owner',
+      surveyAssetId: 'asset_123',
+      issuedAt: 1,
+      signature: 'sig',
+    };
+    const none = buildResponseAttestationInput({
+      ...base,
+      payload: { provenance: 'respondent-signed', docHash: 'sha256:abc', answers: {}, ticketId: null },
+    });
+    expect(none.ref).toBeNull();
+
+    const explicit = buildResponseAttestationInput({
+      ...base,
+      ref: 'explicit',
+      payload: { provenance: 'respondent-signed', docHash: 'sha256:abc', answers: {}, ticketId: 'tkt_1' },
+    });
+    expect(explicit.ref).toBe('explicit');
+  });
+
+  it('keeps supersedes inside the signed payload, and out of the signed bytes when absent', () => {
+    const params = {
+      surveyOwnerDid: 'did:imajin:owner',
+      surveyAssetId: 'asset_123',
+      issuedAt: 1,
+    };
+    const first = { provenance: 'respondent-signed' as const, docHash: 'sha256:abc', answers: {}, ticketId: null };
+    const edit = { ...first, supersedes: 'att_old' };
+
+    expect(canonicalResponsePayload({ ...params, payload: edit })).toContain('"supersedes":"att_old"');
+    expect(canonicalResponsePayload({ ...params, payload: first })).not.toContain('supersedes');
+
+    const input = buildResponseAttestationInput({ ...params, issuerDid: 'did:imajin:respondent', payload: edit, signature: 'sig' });
+    expect(input.payload.supersedes).toBe('att_old');
   });
 
   it('routes node-witnessed-legacy-import payloads to the legacy-import type', () => {

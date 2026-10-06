@@ -196,10 +196,11 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
   signed document (media asset), a response is an attestation, and ticket-holder checks
   compose through a boolean gate. This app owns no database of its own.
 - **App DID:** _<did:imajin:… — set at registration, docs/REGISTRATION.md>_
-- **Scopes:** none of the closed grant-capability or SCOPES vocabularies apply; this app
-  authenticates callers via a single `authenticate()` interface
-  (`src/lib/auth/authenticate.ts`, currently `requireSessionOrAppToken`) and relies entirely
-  on the caller's own DID + the kernel's own authorization checks on each downstream call.
+- **Scopes:** routes ask a token for `dykil:read` (GET) or `dykil:write` (mutations), via the
+  `requireScopes` option of the single `authenticate()` interface
+  (`src/lib/auth/authenticate.ts`, currently `requireSessionOrAppToken`). The kernel can't grant
+  them yet — see imajin-ai#2663. The app otherwise relies on the caller's own DID + the kernel's
+  own authorization checks on each downstream call, forwarding the caller's credentials.
 - **Domain:** dykil.imajin.ai (pm2 entry `dykil`, Caddy route unchanged per #1985).
 - **The real-world loop it instruments:** a survey owner → a respondent: the owner publishes
   a signed survey document, the respondent signs and submits an attestation answering it.
@@ -208,8 +209,7 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
   `dykil/survey-response` / `dykil/survey-response-legacy-import` are the closest analog,
   emitted via `POST {kernel}/auth/api/attestations`, not the bus.
 - **Connectors it consumes:** none. The only cross-app composition is the events app's
-  ticket-holder gate (`src/lib/ticket-gate.ts`), not yet implemented upstream — see
-  [ima-jin/imajin-ai#2395](https://github.com/ima-jin/imajin-ai/issues/2395).
+  ticket-holder gate (`src/lib/ticket-gate.ts`, imajin-ai#2395).
 - **Scope guardrails specific to this app:** never read `events`/ticket rows directly, even
   for a ticket-scoped survey — always go through the gate. Never store a survey or response
   in a table of its own (Ryan's ruling, 2026-09-22). Never sign an attestation with this

@@ -22,6 +22,15 @@ export interface SurveyResponsePayload {
   docHash: string;
   answers: Record<string, unknown>;
   ticketId: string | null;
+  /**
+   * The id of this issuer's own earlier response that this one replaces (an
+   * "edit my answer"). Lives INSIDE the signed payload because the kernel
+   * reads it from `payload.supersedes` (imajin-ai#2649): it retires the
+   * earlier attestation only when it was issued by the same issuer. Omitted —
+   * not null — when this is a first response, so the signed bytes of an
+   * ordinary response never change.
+   */
+  supersedes?: string;
   /** Only present for node-witnessed-legacy-import (deliverable #3/#4). */
   legacyRowRef?: string;
   /** Only present for node-witnessed-legacy-import. */
@@ -47,6 +56,8 @@ export function buildResponseAttestationInput(params: {
   payload: SurveyResponsePayload;
   issuedAt: number;
   signature: string;
+  /** Indexed lookup key — the response's `ticketId`, when it has one. Not part of the signed bytes. */
+  ref?: string | null;
 }): AttestationInput {
   return {
     issuerDid: params.issuerDid,
@@ -57,6 +68,7 @@ export function buildResponseAttestationInput(params: {
     payload: params.payload as unknown as Record<string, unknown>,
     signature: params.signature,
     issuedAt: params.issuedAt,
+    ref: params.ref ?? params.payload.ticketId,
   };
 }
 

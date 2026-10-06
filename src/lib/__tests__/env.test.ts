@@ -7,6 +7,8 @@ const ENV_KEYS = [
   'DYKIL_RESPONSE_ATTESTATION_TYPE',
   'DYKIL_LEGACY_IMPORT_ATTESTATION_TYPE',
   'NEXT_PUBLIC_APP_URL',
+  'EVENTS_SERVICE_URL',
+  'DYKIL_EVENTS_AUTHORIZATION_ID',
 ] as const;
 
 const originalEnv: Record<string, string | undefined> = {};
@@ -96,5 +98,23 @@ describe('src/lib/env', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'not a url';
     const { thisAppHost } = await import('@/lib/env');
     expect(thisAppHost()).toBe('dykil.imajin.ai');
+  });
+
+  it('eventsServiceUrl is undefined when unset or empty, and returns the configured value otherwise', async () => {
+    const { eventsServiceUrl } = await import('@/lib/env');
+    expect(eventsServiceUrl()).toBeUndefined();
+    process.env.EVENTS_SERVICE_URL = '';
+    expect(eventsServiceUrl()).toBeUndefined();
+    process.env.EVENTS_SERVICE_URL = 'https://dev-jin.imajin.ai/events';
+    expect(eventsServiceUrl()).toBe('https://dev-jin.imajin.ai/events');
+  });
+
+  it('eventsGateAuthorizationId is undefined when unset or empty, and returns the configured value otherwise', async () => {
+    const { eventsGateAuthorizationId } = await import('@/lib/env');
+    expect(eventsGateAuthorizationId()).toBeUndefined();
+    process.env.DYKIL_EVENTS_AUTHORIZATION_ID = '';
+    expect(eventsGateAuthorizationId()).toBeUndefined();
+    process.env.DYKIL_EVENTS_AUTHORIZATION_ID = 'att_consent_1';
+    expect(eventsGateAuthorizationId()).toBe('att_consent_1');
   });
 });

@@ -6,6 +6,7 @@ import {
   listMySurveyAssets,
   readOwnerSurveyAsset,
   readPublicSurveyAsset,
+  setSurveyAssetAccess,
   updateSurveyAsset,
 } from '../media';
 
@@ -102,17 +103,77 @@ describe('kernel media client', () => {
     expect(init.method).toBe('DELETE');
   });
 
-  it('listMySurveyAssets filters by the dykil-survey- filename convention (no context filter exists upstream)', async () => {
+  it('createSurveyAsset stores the survey under the dykil/survey upload context with the requested access', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createSurveyAsset({ request: new Request('https://dykil.imajin.ai'), filename: 'f.json', content: '{}', access: 'private' });
+
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    expect(JSON.parse(String(form.get('context')))).toEqual({ app: 'dykil', feature: 'survey', access: 'private' });
+  });
+
+  it('setSurveyAssetAccess PATCHes /access with the new level and forwarded identity', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const asset = await setSurveyAssetAccess(
+      'asset 1',
+      'public',
+      new Request('https://dykil.imajin.ai', { headers: { authorization: 'Bearer t' } }),
+    );
+
+    expect(asset.id).toBe('asset_1');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://dev-jin.imajin.ai/media/api/assets/asset%201/access');
+    expect(init.method).toBe('PATCH');
+    expect(init.headers).toMatchObject({ authorization: 'Bearer t', 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body)).toEqual({ access: 'public' });
+  });
+
+  it('setSurveyAssetAccess surfaces a kernel refusal as KernelMediaError', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: 'Forbidden' }) }));
+    await expect(setSurveyAssetAccess('asset_1', 'private', new Request('https://dykil.imajin.ai'))).rejects.toMatchObject({
+      status: 403,
+      message: 'Forbidden',
+    });
+  });
+
+  it('listMySurveyAssets filters by the dykil/survey upload context and forwards identity', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ assets: [{ id: 'asset_1' }] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const assets = await listMySurveyAssets(new Request('https://dykil.imajin.ai', { headers: { authorization: 'Bearer t' } }));
+
+    expect(assets).toEqual([{ id: 'asset_1' }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url));
+    expect(parsed.pathname).toBe('/media/api/assets');
+    expect(parsed.searchParams.get('context_app')).toBe('dykil');
+    expect(parsed.searchParams.get('context_feature')).toBe('survey');
+    expect(parsed.searchParams.has('search')).toBe(false);
+    expect(init.headers).toMatchObject({ authorization: 'Bearer t' });
+  });
+
+  it('listMySurveyAssets pages by offset while pages come back full, then stops', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `asset_${index}` }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ assets: fullPage }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ assets: [{ id: 'last' }] }) });
     vi.stubGlobal('fetch', fetchMock);
 
     const assets = await listMySurveyAssets(new Request('https://dykil.imajin.ai'));
 
-    expect(assets).toEqual([{ id: 'asset_1' }]);
-    const [url] = fetchMock.mock.calls[0];
-    const parsed = new URL(String(url));
-    expect(parsed.searchParams.get('search')).toBe('dykil-survey-');
-    expect(parsed.searchParams.get('type')).toBe('application');
+    expect(assets).toHaveLength(201);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('offset')).toBe('0');
+    expect(new URL(String(fetchMock.mock.calls[1][0])).searchParams.get('offset')).toBe('200');
+  });
+
+  it('listMySurveyAssets surfaces a kernel failure as KernelMediaError', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: 'Missing required scope: media:read' }) }));
+    await expect(listMySurveyAssets(new Request('https://dykil.imajin.ai'))).rejects.toMatchObject({ status: 403 });
   });
 
   it('KernelMediaError carries status and body for route handlers to relay', () => {

@@ -1,13 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { authenticateMock, readPublicSurveyAssetMock, readOwnerSurveyAssetMock, updateSurveyAssetMock, deleteSurveyAssetMock } =
-  vi.hoisted(() => ({
-    authenticateMock: vi.fn(),
-    readPublicSurveyAssetMock: vi.fn(),
-    readOwnerSurveyAssetMock: vi.fn(),
-    updateSurveyAssetMock: vi.fn(),
-    deleteSurveyAssetMock: vi.fn(),
-  }));
+const {
+  authenticateMock,
+  readPublicSurveyAssetMock,
+  readOwnerSurveyAssetMock,
+  updateSurveyAssetMock,
+  deleteSurveyAssetMock,
+  setSurveyAssetAccessMock,
+} = vi.hoisted(() => ({
+  authenticateMock: vi.fn(),
+  readPublicSurveyAssetMock: vi.fn(),
+  readOwnerSurveyAssetMock: vi.fn(),
+  updateSurveyAssetMock: vi.fn(),
+  deleteSurveyAssetMock: vi.fn(),
+  setSurveyAssetAccessMock: vi.fn(),
+}));
 
 vi.mock('@/lib/auth/authenticate', () => ({ authenticate: authenticateMock }));
 vi.mock('@/lib/kernel/media', async () => {
@@ -18,6 +25,7 @@ vi.mock('@/lib/kernel/media', async () => {
     readOwnerSurveyAsset: readOwnerSurveyAssetMock,
     updateSurveyAsset: updateSurveyAssetMock,
     deleteSurveyAsset: deleteSurveyAssetMock,
+    setSurveyAssetAccess: setSurveyAssetAccessMock,
   };
 });
 
@@ -65,6 +73,15 @@ describe('GET /api/surveys/:id', () => {
 
     expect(response.status).toBe(200);
     expect(body.title).toBe('Published survey');
+  });
+
+  it('authenticates optionally, asking for dykil:read', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
+    readPublicSurveyAssetMock.mockResolvedValue(publishedDoc);
+
+    await GET(new Request('https://dykil.imajin.ai/api/surveys/asset_1') as never, params('asset_1'));
+
+    expect(authenticateMock).toHaveBeenCalledWith(expect.anything(), { requireScopes: ['dykil:read'] });
   });
 
   it('404s a draft survey for a non-owner', async () => {
@@ -120,6 +137,96 @@ describe('PUT /api/surveys/:id', () => {
     authenticateMock.mockReset();
     readOwnerSurveyAssetMock.mockReset();
     updateSurveyAssetMock.mockReset();
+    setSurveyAssetAccessMock.mockReset();
+  });
+
+  function putRequest(body: unknown) {
+    return new Request('https://dykil.imajin.ai/api/surveys/asset_1', { method: 'PUT', body: JSON.stringify(body) });
+  }
+
+  function asOwnerOf(doc: unknown) {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    readOwnerSurveyAssetMock.mockResolvedValue({ content: doc, filename: 'f.json' });
+    updateSurveyAssetMock.mockResolvedValue({ ok: true });
+    setSurveyAssetAccessMock.mockResolvedValue({ id: 'asset_1' });
+  }
+
+  it('requires the dykil:write scope', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Missing required scope(s): dykil:write', status: 403 });
+
+    const response = await PUT(putRequest({ title: 'x' }) as never, params('asset_1'));
+
+    expect(response.status).toBe(403);
+    expect(authenticateMock).toHaveBeenCalledWith(expect.anything(), { requireScopes: ['dykil:write'] });
+  });
+
+  it('publishes a draft: writes the new content first, then flips the asset public', async () => {
+    asOwnerOf(draftDoc);
+    const order: string[] = [];
+    updateSurveyAssetMock.mockImplementation(async () => order.push('content'));
+    setSurveyAssetAccessMock.mockImplementation(async (_id: string, access: string) => order.push(`access:${access}`));
+
+    const response = await PUT(putRequest({ status: 'published' }) as never, params('asset_1'));
+
+    expect(response.status).toBe(200);
+    expect(order).toEqual(['content', 'access:public']);
+    expect(setSurveyAssetAccessMock.mock.calls[0][0]).toBe('asset_1');
+  });
+
+  it.each(['draft', 'closed'])('takes a published survey back to %s: flips the asset private first, then writes the content', async (status) => {
+    asOwnerOf(publishedDoc);
+    const order: string[] = [];
+    updateSurveyAssetMock.mockImplementation(async () => order.push('content'));
+    setSurveyAssetAccessMock.mockImplementation(async (_id: string, access: string) => order.push(`access:${access}`));
+
+    const response = await PUT(putRequest({ status }) as never, params('asset_1'));
+
+    expect(response.status).toBe(200);
+    expect(order).toEqual(['access:private', 'content']);
+  });
+
+  it.each([
+    ['a published survey that stays published', publishedDoc, { title: 'Renamed' }],
+    ['a draft that stays a draft', draftDoc, { title: 'Renamed' }],
+    ['a draft moving to closed', draftDoc, { status: 'closed' }],
+  ])('leaves the access level alone for %s', async (_label, doc, change) => {
+    asOwnerOf(doc);
+
+    const response = await PUT(putRequest(change) as never, params('asset_1'));
+
+    expect(response.status).toBe(200);
+    expect(setSurveyAssetAccessMock).not.toHaveBeenCalled();
+    expect(updateSurveyAssetMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a kernel refusal of the access change as its own status', async () => {
+    asOwnerOf(draftDoc);
+    const { KernelMediaError } = await import('@/lib/kernel/media');
+    setSurveyAssetAccessMock.mockRejectedValue(new KernelMediaError('Immutable asset — access level cannot be changed', 403, null));
+
+    const response = await PUT(putRequest({ status: 'published' }) as never, params('asset_1'));
+
+    expect(response.status).toBe(403);
+  });
+
+  it('drops allowAnonymous from updated settings — every response is signed', async () => {
+    asOwnerOf(publishedDoc);
+
+    const response = await PUT(putRequest({ settings: { allowAnonymous: true, multipleResponses: true } }) as never, params('asset_1'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.settings).toEqual({ multipleResponses: true });
+    expect(JSON.parse(updateSurveyAssetMock.mock.calls[0][1]).settings).toEqual({ multipleResponses: true });
+  });
+
+  it('rejects invalid settings without writing anything', async () => {
+    asOwnerOf(publishedDoc);
+
+    const response = await PUT(putRequest({ settings: { multipleResponses: 'yes' } }) as never, params('asset_1'));
+
+    expect(response.status).toBe(400);
+    expect(updateSurveyAssetMock).not.toHaveBeenCalled();
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -212,6 +319,15 @@ describe('DELETE /api/surveys/:id', () => {
     authenticateMock.mockReset();
     readOwnerSurveyAssetMock.mockReset();
     deleteSurveyAssetMock.mockReset();
+  });
+
+  it('requires the dykil:write scope', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Missing required scope(s): dykil:write', status: 403 });
+
+    const response = await DELETE(new Request('https://dykil.imajin.ai/api/surveys/asset_1', { method: 'DELETE' }) as never, params('asset_1'));
+
+    expect(response.status).toBe(403);
+    expect(authenticateMock).toHaveBeenCalledWith(expect.anything(), { requireScopes: ['dykil:write'] });
   });
 
   it('returns 401 when unauthenticated', async () => {

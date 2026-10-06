@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server';
 import { createLogger } from '@ima-jin/logger';
 import { authenticate } from '@/lib/auth/authenticate';
-import { readPublicSurveyAsset, readOwnerSurveyAsset, KernelMediaError } from '@/lib/kernel/media';
-import { listAttestations, KernelAttestationError } from '@/lib/kernel/attestations';
-import { responseAttestationType, legacyImportAttestationType } from '@/lib/env';
+import { DYKIL_READ_SCOPE } from '@/lib/auth/scopes';
+import { KernelMediaError } from '@/lib/kernel/media';
+import { KernelAttestationError } from '@/lib/kernel/attestations';
+import { forwardedIdentityHeaders } from '@/lib/kernel/forward';
+import { listAllSurveyResponses } from '@/lib/responses';
+import { loadSurveyDoc } from '@/lib/route-helpers';
 import { corsHeaders, corsOptions, errorResponse, jsonResponse } from '@/lib/http';
-import { isSurveyDoc } from '@/lib/survey';
 
 const log = createLogger('dykil');
 
@@ -20,56 +22,51 @@ export async function OPTIONS(request: NextRequest) {
 /**
  * GET /api/surveys/:id/responses/check — has the caller already responded?
  *
- * Two modes:
- *  - Authenticated (session/app-token) — checked by `issuer_did` on the
- *    attestation, an efficient server-side filter the public attestations
- *    API supports directly.
- *  - `?ticketId=` — ticket-scoped check (e.g. one response per ticket for a
- *    ticket-gated survey). This intentionally replaces the original
- *    `responses/by-ticket/[ticketId]` route: it answers "has this ticket
- *    responded", never "give me the ticket-scoped row" — the owner-only
- *    listing (`GET /responses`) is the only place raw response rows are
- *    returned, and even that never touches ticket data itself (Ryan's
- *    ruling — see src/lib/ticket-gate.ts).
+ * Authenticated callers only (the original's unauthenticated `?did=` probe
+ * was deliberately not carried over — it let anyone test whether a DID had
+ * responded). Two modes:
+ *  - default — the caller's own active response, by `issuer_did`.
+ *  - `?ticketId=` — a ticket-scoped check (e.g. one response per ticket),
+ *    by the indexed `ref` the response was recorded with (imajin-ai#2534)
+ *    rather than by scanning payloads. It answers "has this ticket
+ *    responded", never "give me the ticket row"; response rows are
+ *    `disclosure_scope`-gated, so a caller only ever matches their own
+ *    responses (the survey owner matches any).
+ *
+ * `?include=answers` adds the stored answers to a match.
  */
 export async function GET(request: NextRequest, props: RouteParams) {
   const { id } = await props.params;
   const cors = corsHeaders(request);
-  const ticketId = request.nextUrl.searchParams.get('ticketId');
-  const includeAnswers = request.nextUrl.searchParams.get('include') === 'answers';
+  const { searchParams } = new URL(request.url);
+  const ticketId = searchParams.get('ticketId');
+  const includeAnswers = searchParams.get('include') === 'answers';
+
+  const authResult = await authenticate(request, { requireScopes: [DYKIL_READ_SCOPE] });
+  if ('error' in authResult) {
+    return errorResponse(authResult.error, authResult.status, cors);
+  }
+  const callerDid = authResult.auth.did;
 
   try {
-    const publicContent = await readPublicSurveyAsset(id);
-    const doc = publicContent && isSurveyDoc(publicContent) ? publicContent : null;
-    const owned = doc ?? (await readOwnerSurveyAsset(id, request).catch(() => null))?.content;
-    if (!owned || !isSurveyDoc(owned)) {
+    const doc = await loadSurveyDoc(id, request);
+    if (!doc) {
       return errorResponse('Survey not found', 404, cors);
     }
 
-    const authResult = await authenticate(request);
-    const callerDid = 'auth' in authResult ? authResult.auth.did : null;
+    const candidates = await listAllSurveyResponses(
+      {
+        ownerDid: doc.ownerDid,
+        surveyId: id,
+        issuerDid: ticketId ? undefined : callerDid,
+        ref: ticketId ?? undefined,
+      },
+      forwardedIdentityHeaders(request),
+    );
 
-    if (!callerDid && !ticketId) {
-      return jsonResponse({ completed: false }, 200, cors);
-    }
-
-    const [respondentSigned, legacyImported] = await Promise.all([
-      listAttestations({
-        subjectDid: owned.ownerDid,
-        type: responseAttestationType(),
-        issuerDid: callerDid ?? undefined,
-      }),
-      ticketId
-        ? listAttestations({ subjectDid: owned.ownerDid, type: legacyImportAttestationType() })
-        : Promise.resolve([]),
-    ]);
-
-    const candidates = [...respondentSigned, ...legacyImported].filter((attestation) => attestation.contextId === id);
-    const match = candidates.find((attestation) => {
-      if (ticketId) return attestation.payload?.ticketId === ticketId;
-      return attestation.issuerDid === callerDid;
-    });
-
+    const match = candidates.find((attestation) =>
+      ticketId ? attestation.payload?.ticketId === ticketId : attestation.issuerDid === callerDid,
+    );
     if (!match) {
       return jsonResponse({ completed: false }, 200, cors);
     }

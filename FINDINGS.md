@@ -90,3 +90,48 @@ this app needs one, stop and write it as a DECISION card instead." I did not hit
 needed one. Ryan's ruling had already pre-decided this (DECISION #1985->c); this card exists
 only to record that the rebuild was checked against it and found no exception, not to reopen it ·
 rec: n/a — confirms, doesn't revisit, the existing decision.`
+
+## Step 2 update (refs #2521) — what the new kernel primitives changed
+
+Step 2 rebuilt the app on the primitives the first run was missing. Status of the run-1 gaps, and
+what step 2 found.
+
+**Closed by kernel work, now used:**
+
+- #2535 `PATCH /media/api/assets/{id}/access` — draft/published is now a real access flip, so a draft
+  is `private`, not unlisted-by-obscurity. The "draft-survey visibility" DECISION card above is
+  resolved by this (option c, without blocking creation).
+- #2648 `GET /media/api/assets?context_app=dykil&context_feature=survey` — surveys are listed by
+  upload context, not a filename convention.
+- #2396 `context_id`, #2533 cursor paging (`before` / `X-Next-Cursor`), #2534 indexed `ref` — the
+  owner listing, the owner export and the ticket lookup are server-side filters now. This also fixes
+  the two step-1 defects: reads now carry the caller's credentials, and the pagination loop advances.
+- #2649 same-issuer `supersedes` and issuer-only revoke — "edit my answer" and "withdraw my
+  answer" (see docs/ARCHITECTURE.md).
+- #2395 boolean ticket-holder gate — `src/lib/ticket-gate.ts` calls it for real.
+- #2536 ruling c — `allowAnonymous` is dropped; every response is signed.
+
+**Still open (this step's own findings):**
+
+1. **`dykil:read` / `dykil:write` can't be granted.** `POST /auth/api/tokens/app` clamps scopes to the
+   kernel's `SCOPE_VOCABULARY`; neither is in it. Token callers get a 403 until it is. The cookie path
+   is unaffected. → [ima-jin/imajin-ai#2663](https://github.com/ima-jin/imajin-ai/issues/2663)
+2. **One token can't satisfy both dykil and media.** A token has one `aud`; dykil and the media routes
+   each verify their own. Attestation calls are not affected. Same issue, #2663.
+3. **The events gate credential is operator-supplied.** The gate needs `events:read` via
+   `requireAppAuth`; session-less service tokens carry no scopes today, so dykil mints its token through
+   `POST /auth/api/apps/token` bound to an `app.authorized` attestation id
+   (`DYKIL_EVENTS_AUTHORIZATION_ID`). Until an operator creates that, ticket-gated surveys answer 501.
+4. **`scripts/import-legacy.ts` is step 4's (#2522) to finish.** It was adapted to the new client API
+   (`ref`, cursor listing, no `allowAnonymous`) but still reads attestations and uploads documents with
+   no credentials, so against a real kernel its idempotency check sees nothing and its upload is
+   refused. It also doesn't yet record the legacy-id to asset-id map #2522 needs.
+5. **Respondent signing is still caller-side.** The respondent must produce the Ed25519 signature
+   over `canonicalResponsePayload(...)` itself, including `supersedes` for an edit (#2394 gap, unchanged).
+6. **No UI yet.** Create, dashboard, results, respond, handle and embed pages are not part of this PR.
+
+`DECISION · edit semantics · attestations are immutable, the original upserted a response per
+(survey, respondent) · a) one active response per respondent unless settings.multipleResponses; an
+edit is a new response with payload.supersedes (409 otherwise) b) always allow many, never supersede
+c) block edits · rec: a — matches the original's one-row-per-respondent default, uses the kernel's
+supersession chain, and keeps the signed record of every prior version readable by id.`

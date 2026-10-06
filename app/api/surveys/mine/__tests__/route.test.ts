@@ -27,6 +27,15 @@ describe('GET /api/surveys/mine', () => {
     expect(response.status).toBe(401);
   });
 
+  it('requires the dykil:read scope', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Missing required scope(s): dykil:read', status: 403 });
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys/mine') as never);
+
+    expect(response.status).toBe(403);
+    expect(authenticateMock).toHaveBeenCalledWith(expect.anything(), { requireScopes: ['dykil:read'] });
+  });
+
   it("lists the caller's own surveys, skipping any asset that is not a valid survey doc", async () => {
     authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
     listMySurveyAssetsMock.mockResolvedValue([{ id: 'asset_1' }, { id: 'asset_2' }]);
