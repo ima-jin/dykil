@@ -49,4 +49,25 @@ export function thisAppHost(): string {
   }
 }
 
+/**
+ * Base URL of the events service, e.g. https://dev-jin.imajin.ai/events. Optional:
+ * only ticket-gated surveys (`settings.eventId`) need it, and they answer 501
+ * until it is configured.
+ */
+export function eventsServiceUrl(): string | undefined {
+  return process.env.EVENTS_SERVICE_URL || undefined;
+}
+
+/**
+ * The id of the `app.authorized` attestation that grants this app the
+ * `events:read` scope — what the ticket gate's proof-of-possession token mint
+ * (`POST {kernel}/auth/api/apps/token`) is bound to. Optional, same as above.
+ */
+export function eventsGateAuthorizationId(): string | undefined {
+  return process.env.DYKIL_EVENTS_AUTHORIZATION_ID || undefined;
+}
+
 export const DYKIL_SURVEY_CONTEXT_TYPE = 'dykil.survey';
+/** Upload context a survey document is stored under — `GET /media/api/assets?context_app=…&context_feature=…`. */
+export const DYKIL_MEDIA_CONTEXT_APP = 'dykil';
+export const DYKIL_MEDIA_CONTEXT_FEATURE = 'survey';

@@ -1,19 +1,30 @@
 import { NextRequest } from 'next/server';
 import { createLogger } from '@ima-jin/logger';
 import { authenticate } from '@/lib/auth/authenticate';
+import { DYKIL_READ_SCOPE, DYKIL_WRITE_SCOPE } from '@/lib/auth/scopes';
 import { createSurveyAsset, KernelMediaError } from '@/lib/kernel/media';
 import { errorResponse, jsonResponse } from '@/lib/http';
+import { listOwnSurveys } from '@/lib/route-helpers';
 import {
   normalizeSurveyFields,
+  normalizeSurveySettings,
   surveyFilename,
   SURVEY_DOC_SCHEMA,
   type SurveyDoc,
-  type SurveySettings,
   type SurveyStatus,
   type SurveyType,
 } from '@/lib/survey';
 
 const log = createLogger('dykil');
+
+/** GET /api/surveys — list the authenticated caller's own surveys (same as `/api/surveys/mine`). */
+export async function GET(request: NextRequest) {
+  const authResult = await authenticate(request, { requireScopes: [DYKIL_READ_SCOPE] });
+  if ('error' in authResult) {
+    return errorResponse(authResult.error, authResult.status);
+  }
+  return listOwnSurveys(request);
+}
 
 /**
  * POST /api/surveys — create a new survey.
@@ -24,7 +35,7 @@ const log = createLogger('dykil');
  * asset's `.fair` manifest on the owner's behalf.
  */
 export async function POST(request: NextRequest) {
-  const authResult = await authenticate(request);
+  const authResult = await authenticate(request, { requireScopes: [DYKIL_WRITE_SCOPE] });
   if ('error' in authResult) {
     return errorResponse(authResult.error, authResult.status);
   }
@@ -41,7 +52,7 @@ export async function POST(request: NextRequest) {
     title?: string;
     description?: string;
     fields?: unknown;
-    settings?: SurveySettings;
+    settings?: unknown;
     status?: SurveyStatus;
     type?: SurveyType;
   };
@@ -55,6 +66,11 @@ export async function POST(request: NextRequest) {
     return errorResponse(normalized.error);
   }
 
+  const normalizedSettings = normalizeSurveySettings(settings);
+  if ('error' in normalizedSettings) {
+    return errorResponse(normalizedSettings.error);
+  }
+
   const now = new Date().toISOString();
   const doc: SurveyDoc = {
     schema: SURVEY_DOC_SCHEMA,
@@ -62,17 +78,17 @@ export async function POST(request: NextRequest) {
     title,
     description: description ?? null,
     fields: normalized.fields,
-    settings: settings ?? {},
+    settings: normalizedSettings.settings,
     type: type ?? 'survey',
     status: status ?? 'draft',
     createdAt: now,
     updatedAt: now,
   };
 
-  // Published surveys must be readable by anonymous respondents; drafts are
-  // unlisted (see docs/ARCHITECTURE.md for the honest caveat this carries —
-  // the kernel has no per-asset access-level update endpoint today, so a
-  // draft's access level is fixed at creation).
+  // Published surveys must be readable by respondents who have no session of
+  // their own yet; anything else is genuinely private. The access level moves
+  // with the status afterwards via PATCH /media/api/assets/{id}/access (see
+  // persistSurveyUpdate in src/lib/route-helpers.ts).
   const access = doc.status === 'published' ? 'public' : 'private';
 
   try {

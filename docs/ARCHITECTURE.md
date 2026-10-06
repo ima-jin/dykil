@@ -13,10 +13,11 @@ dykil does not earn a domain schema. It is rebuilt on kernel primitives:
 - **Response = an attestation** — "DID X said Y about survey `<docHash>`, signed", carrying an optional ticket ref.
   `POST {kernel}/auth/api/attestations`, `subject_did` = survey owner, `issuer_did` = the respondent, `context_id`
   = the survey's asset id, `payload.docHash` = a content hash of the survey document.
-- **Ticket-holder check = a composable gate** — `src/lib/ticket-gate.ts`. dykil never reads ticket rows; the events
-  app answers a boolean. As of this writing that endpoint doesn't exist upstream (filed as
-  [ima-jin/imajin-ai#2395](https://github.com/ima-jin/imajin-ai/issues/2395)), so the gate is stubbed behind an
-  interface and fails loudly (`501`) rather than silently reading ticket data.
+- **Ticket-holder check = a composable gate** — `src/lib/ticket-gate.ts` asks the events app's
+  `GET /api/events/{id}/access?did=` (imajin-ai#2395), which answers exactly `{ hasAccess: boolean }`. dykil never
+  reads ticket rows. The call carries a scoped `events:read` app token this app mints with its own key
+  (`src/lib/events-gate-token.ts`); an unconfigured gate answers `501`, a refused or unreachable one `502` — it
+  never degrades to "no ticket" or "has a ticket".
 - **dykil itself = a thin app** composing these primitives `onBehalfOf` the respondent, registered per #1990.
 
 ## The three-tier projection model
@@ -47,27 +48,45 @@ Browser / another app
   -> dykil's own route logic (src/lib/survey.ts, src/lib/response-attestation.ts, src/lib/ticket-gate.ts)
   -> kernel media service   (src/lib/kernel/media.ts)         -- survey documents
   -> kernel auth service    (src/lib/kernel/attestations.ts)  -- responses
-  -> events app ticket gate (src/lib/ticket-gate.ts)          -- boolean only, not yet real
+  -> events app ticket gate (src/lib/ticket-gate.ts)          -- boolean only
 ```
+
+## Surveys: draft and published
+
+A survey's `.fair` access level follows its `status`: only `published` is `public`; `draft` and `closed` are
+`private`. Creating a published survey uploads it `public`; every later status change moves the asset with
+`PATCH /media/api/assets/{id}/access` (`persistSurveyUpdate` in `src/lib/route-helpers.ts`). The order keeps the
+document from being public longer than its status says: going private flips access first, going public flips
+it last, after the new content is written. Surveys are listed with
+`GET /media/api/assets?context_app=dykil&context_feature=survey` — no filename convention.
+
+## Responses: signed, editable, withdrawable
+
+A response is an attestation: `type: dykil/survey-response`, `subject_did` = the survey owner,
+`context_id` = the survey asset id, `payload.docHash` binding it to the definition answered. The `ticketId` is
+carried both in the signed payload and as the attestation's indexed `ref` (not part of the signed bytes).
+
+- **One active response per respondent**, unless `settings.multipleResponses`. A second one is a `409` that names
+  the response to edit.
+- **Edit** = `POST /respond` with `supersedes: <your earlier response id>`. It lives inside the signed payload,
+  because the kernel reads `payload.supersedes` and retires the earlier row only when the same DID issued it.
+- **Withdraw** = `DELETE /responses/{id}`, the kernel's issuer-only revoke. The record isn't erased; it drops
+  out of reads.
+- **Owner export** follows the kernel's cursor (`before` / `X-Next-Cursor`) to the end; `?limit=&cursor=` pages.
+- **No anonymous path.** `allowAnonymous` was dropped (imajin-ai#2536, ruling c); it is stripped from any
+  incoming settings. Reads are `disclosure_scope`-gated, so every kernel call carries the caller's own
+  credentials.
 
 ## Known simplifications (honest, not hidden)
 
-- **Draft visibility is unlisted, not cryptographically private.** A survey's `.fair` access level (`public` vs
-  `private`) is fixed at asset-creation time — the kernel has no endpoint to flip it later. This app sets `access`
-  from the survey's initial `status`, and additionally enforces "draft surveys 404 for non-owners" at the app layer
-  by checking the document's own `status` field. Someone holding a draft's raw asset id could still fetch its JSON
-  directly from the kernel's public asset-serving endpoint. This mirrors how most "unlisted" documents work
-  elsewhere on the web; it is not the same guarantee as `private` visibility, and is called out here rather than
-  asserted away.
-- **No server-side `context_id` filter on attestations.** `GET {kernel}/auth/api/attestations` filters by
-  `subject_did`/`type`/`issuer_did` only. Listing "this survey's responses" fetches all of a survey owner's
-  responses (across every survey they own) and filters by `context_id` client-side, paginated up to a bounded
-  number of pages. Fine at today's scale; a real gap for a prolific survey owner — filed as
-  [ima-jin/imajin-ai#2396](https://github.com/ima-jin/imajin-ai/issues/2396).
+- **Scopes and audiences.** Routes require `dykil:read` / `dykil:write` on the token path, but the kernel can't
+  yet grant them, and a token minted for dykil is not accepted by the media routes — see
+  [ima-jin/imajin-ai#2663](https://github.com/ima-jin/imajin-ai/issues/2663). The shared session cookie works
+  today.
 - **No public handle→DID resolver exists** (checked `auth.yaml`, `registry.yaml`, `profile.yaml`). The
   `/api/surveys/handle/:handle` route was already an unimplemented stub in the original `apps/dykil` for the same
-  reason — this rebuild keeps it honest rather than pretending to solve it. Filed as
-  [ima-jin/imajin-ai#2397](https://github.com/ima-jin/imajin-ai/issues/2397).
+  reason. Filed as [ima-jin/imajin-ai#2397](https://github.com/ima-jin/imajin-ai/issues/2397).
+- **Respondent signing is caller-side.** This app never holds a respondent's key.
 
 ## Deploy convention
 

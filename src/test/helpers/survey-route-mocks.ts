@@ -1,11 +1,10 @@
 import { vi } from 'vitest';
 
 /**
- * Shared mock scaffolding for the /api/surveys/:id/responses* routes. Both
- * `responses/__tests__/route.test.ts` and `responses/check/__tests__/route.test.ts`
- * exercise the exact same "resolve survey doc, check ownership/access,
- * query attestations" shape, so this lives in one place instead of being
- * copy-pasted per test file.
+ * Shared mock scaffolding for the /api/surveys/:id/respond* and /responses*
+ * routes. They all exercise the same "resolve survey doc, check
+ * ownership/access, talk to the attestations API" shape, so this lives in one
+ * place instead of being copy-pasted per test file.
  */
 // `vi.mock` factories below are hoisted to the top of this module by
 // vitest's transform, but the factories themselves only run lazily (when a
@@ -16,7 +15,10 @@ import { vi } from 'vitest';
 export const authenticateMock = vi.fn();
 export const readPublicSurveyAssetMock = vi.fn();
 export const readOwnerSurveyAssetMock = vi.fn();
-export const listAttestationsMock = vi.fn();
+export const listAllAttestationsMock = vi.fn();
+export const listAttestationsPageMock = vi.fn();
+export const createAttestationMock = vi.fn();
+export const revokeAttestationMock = vi.fn();
 
 vi.mock('@/lib/auth/authenticate', () => ({ authenticate: authenticateMock }));
 vi.mock('@/lib/kernel/media', async () => {
@@ -25,14 +27,23 @@ vi.mock('@/lib/kernel/media', async () => {
 });
 vi.mock('@/lib/kernel/attestations', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kernel/attestations')>('@/lib/kernel/attestations');
-  return { ...actual, listAttestations: listAttestationsMock };
+  return {
+    ...actual,
+    listAllAttestations: listAllAttestationsMock,
+    listAttestationsPage: listAttestationsPageMock,
+    createAttestation: createAttestationMock,
+    revokeAttestation: revokeAttestationMock,
+  };
 });
 
 export function resetSurveyRouteMocks(): void {
   authenticateMock.mockReset();
   readPublicSurveyAssetMock.mockReset();
   readOwnerSurveyAssetMock.mockReset();
-  listAttestationsMock.mockReset();
+  listAllAttestationsMock.mockReset();
+  listAttestationsPageMock.mockReset();
+  createAttestationMock.mockReset();
+  revokeAttestationMock.mockReset();
 }
 
 export const publishedSurveyDocFixture = {
@@ -50,4 +61,8 @@ export const publishedSurveyDocFixture = {
 
 export function routeParams(id: string): { params: Promise<{ id: string }> } {
   return { params: Promise.resolve({ id }) };
+}
+
+export function asCaller(did: string): { auth: { did: string; scopes: string[]; via: 'token' } } {
+  return { auth: { did, scopes: [], via: 'token' } };
 }

@@ -1,17 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { authenticateMock, createSurveyAssetMock } = vi.hoisted(() => ({
+const { authenticateMock, createSurveyAssetMock, listMySurveyAssetsMock, readOwnerSurveyAssetMock } = vi.hoisted(() => ({
   authenticateMock: vi.fn(),
   createSurveyAssetMock: vi.fn(),
+  listMySurveyAssetsMock: vi.fn(),
+  readOwnerSurveyAssetMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/authenticate', () => ({ authenticate: authenticateMock }));
 vi.mock('@/lib/kernel/media', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kernel/media')>('@/lib/kernel/media');
-  return { ...actual, createSurveyAsset: createSurveyAssetMock };
+  return {
+    ...actual,
+    createSurveyAsset: createSurveyAssetMock,
+    listMySurveyAssets: listMySurveyAssetsMock,
+    readOwnerSurveyAsset: readOwnerSurveyAssetMock,
+  };
 });
 
-import { POST } from '../route';
+import { GET, POST } from '../route';
 
 function jsonRequest(body: unknown) {
   return new Request('https://dykil.imajin.ai/api/surveys', {
@@ -60,7 +67,48 @@ describe('POST /api/surveys', () => {
     expect(uploadedDoc.fields).toEqual({ elements: [{ id: 'f1', type: 'text', label: 'Name', required: true }] });
   });
 
-  it('marks a draft survey private (unlisted) at creation', async () => {
+  it('requires the dykil:write scope', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Missing required scope(s): dykil:write', status: 403 });
+
+    const response = await POST(jsonRequest({ title: 'X', fields: [] }) as never);
+
+    expect(response.status).toBe(403);
+    expect(authenticateMock).toHaveBeenCalledWith(expect.anything(), { requireScopes: ['dykil:write'] });
+  });
+
+  it('drops allowAnonymous from the stored settings — every response is signed', async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    createSurveyAssetMock.mockResolvedValue({ id: 'asset_3' });
+
+    const response = await POST(
+      jsonRequest({
+        title: 'X',
+        fields: [{ name: 'q1', type: 'text', title: 'Q1' }],
+        settings: { allowAnonymous: true, multipleResponses: true, eventId: 'event_1' },
+      }) as never,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.settings).toEqual({ multipleResponses: true, eventId: 'event_1' });
+    expect(JSON.parse(createSurveyAssetMock.mock.calls[0][0].content).settings).toEqual({ multipleResponses: true, eventId: 'event_1' });
+  });
+
+  it.each([
+    ['a non-object', 'nope'],
+    ['an array', []],
+    ['a non-boolean multipleResponses', { multipleResponses: 'yes' }],
+    ['an empty eventId', { eventId: '' }],
+  ])('rejects settings that are %s', async (_label, settings) => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+
+    const response = await POST(jsonRequest({ title: 'X', fields: [{ name: 'q1', type: 'text', title: 'Q1' }], settings }) as never);
+
+    expect(response.status).toBe(400);
+    expect(createSurveyAssetMock).not.toHaveBeenCalled();
+  });
+
+  it('marks a draft survey private at creation — a draft is genuinely private, not merely unlisted', async () => {
     authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
     createSurveyAssetMock.mockResolvedValue({ id: 'asset_2' });
 
@@ -100,5 +148,41 @@ describe('POST /api/surveys', () => {
 
     const response = await POST(jsonRequest({ title: 'X', fields: [{ name: 'q1', type: 'text', title: 'Q1' }] }) as never);
     expect(response.status).toBe(500);
+  });
+});
+
+describe('GET /api/surveys', () => {
+  beforeEach(() => {
+    authenticateMock.mockReset();
+    listMySurveyAssetsMock.mockReset();
+    readOwnerSurveyAssetMock.mockReset();
+  });
+
+  it('returns 401 when unauthenticated', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys') as never);
+    expect(response.status).toBe(401);
+    expect(listMySurveyAssetsMock).not.toHaveBeenCalled();
+  });
+
+  it('requires the dykil:read scope', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Missing required scope(s): dykil:read', status: 403 });
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys') as never);
+
+    expect(response.status).toBe(403);
+    expect(authenticateMock).toHaveBeenCalledWith(expect.anything(), { requireScopes: ['dykil:read'] });
+  });
+
+  it("lists the caller's own surveys, same as /api/surveys/mine", async () => {
+    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:owner', scopes: [], via: 'token' } });
+    listMySurveyAssetsMock.mockResolvedValue([{ id: 'asset_1' }]);
+    readOwnerSurveyAssetMock.mockResolvedValue({ content: { schema: 'dykil.survey/v1', title: 'Mine' }, filename: 'f.json' });
+
+    const response = await GET(new Request('https://dykil.imajin.ai/api/surveys') as never);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.surveys).toEqual([{ id: 'asset_1', schema: 'dykil.survey/v1', title: 'Mine' }]);
   });
 });

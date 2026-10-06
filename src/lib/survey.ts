@@ -28,7 +28,14 @@ export interface SurveyFields {
 }
 
 export interface SurveySettings {
-  allowAnonymous?: boolean;
+  /**
+   * `allowAnonymous` is intentionally absent (Ryan's ruling on imajin-ai#2536,
+   * 2026-10-06): every response is signed by its respondent's own DID, so
+   * there is no anonymous path. `normalizeSurveySettings` drops it from any
+   * incoming settings. Anonymous responses are deferred until the guest-
+   * identity design lands.
+   */
+  /** When false/absent, a respondent holds at most one active response — a second one must supersede it. */
   multipleResponses?: boolean;
   /** Present only when this survey is ticket-gated — see src/lib/ticket-gate.ts. */
   eventId?: string;
@@ -82,6 +89,29 @@ export function normalizeSurveyFields(fields: unknown): NormalizeResult {
   }
 
   return { error: 'fields must be an array or SurveyJS schema' };
+}
+
+type NormalizeSettingsResult = { error: string } | { settings: SurveySettings };
+
+/**
+ * Validate and normalize a survey's `settings`. `allowAnonymous` is dropped
+ * (see `SurveySettings`), so a legacy client that still sends it keeps working
+ * but can never switch anonymous responses on. Other keys pass through.
+ */
+export function normalizeSurveySettings(settings: unknown): NormalizeSettingsResult {
+  if (settings === undefined || settings === null) return { settings: {} };
+  if (typeof settings !== 'object' || Array.isArray(settings)) {
+    return { error: 'settings must be an object' };
+  }
+  const rest: Record<string, unknown> = { ...(settings as Record<string, unknown>) };
+  delete rest.allowAnonymous;
+  if (rest.multipleResponses !== undefined && typeof rest.multipleResponses !== 'boolean') {
+    return { error: 'settings.multipleResponses must be a boolean' };
+  }
+  if (rest.eventId !== undefined && (typeof rest.eventId !== 'string' || rest.eventId.length === 0)) {
+    return { error: 'settings.eventId must be a non-empty string' };
+  }
+  return { settings: rest as SurveySettings };
 }
 
 function isFieldConditionMet(visibleIf: string | undefined, answers: Record<string, unknown>): boolean {

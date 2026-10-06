@@ -4,6 +4,7 @@ import {
   findMissingRequiredField,
   isSurveyDoc,
   normalizeSurveyFields,
+  normalizeSurveySettings,
   SURVEY_DOC_SCHEMA,
   surveyFilename,
   type SurveyDoc,
@@ -106,5 +107,41 @@ describe('computeDocHash / isSurveyDoc / surveyFilename', () => {
 
   it('builds a filename under the dykil-survey- prefix', () => {
     expect(surveyFilename('abc')).toBe('dykil-survey-abc.json');
+  });
+});
+
+describe('normalizeSurveySettings', () => {
+  it('treats missing settings as empty', () => {
+    expect(normalizeSurveySettings(undefined)).toEqual({ settings: {} });
+    expect(normalizeSurveySettings(null)).toEqual({ settings: {} });
+  });
+
+  it('drops allowAnonymous — every response is signed (imajin-ai#2536, ruling c) — and keeps the rest', () => {
+    expect(normalizeSurveySettings({ allowAnonymous: true, multipleResponses: false, eventId: 'event_1', custom: 1 })).toEqual({
+      settings: { multipleResponses: false, eventId: 'event_1', custom: 1 },
+    });
+    expect(normalizeSurveySettings({ allowAnonymous: false })).toEqual({ settings: {} });
+  });
+
+  it('does not mutate its input', () => {
+    const input = { allowAnonymous: true, multipleResponses: true };
+    normalizeSurveySettings(input);
+    expect(input).toEqual({ allowAnonymous: true, multipleResponses: true });
+  });
+
+  it.each([
+    ['a string', 'x'],
+    ['a number', 3],
+    ['an array', []],
+  ])('rejects %s', (_label, value) => {
+    expect(normalizeSurveySettings(value)).toEqual({ error: 'settings must be an object' });
+  });
+
+  it('rejects a non-boolean multipleResponses', () => {
+    expect(normalizeSurveySettings({ multipleResponses: 'yes' })).toEqual({ error: 'settings.multipleResponses must be a boolean' });
+  });
+
+  it.each([[''], [5], [null]])('rejects an invalid eventId %j', (eventId) => {
+    expect(normalizeSurveySettings({ eventId })).toEqual({ error: 'settings.eventId must be a non-empty string' });
   });
 });

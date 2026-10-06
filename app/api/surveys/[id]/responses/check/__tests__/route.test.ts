@@ -1,24 +1,25 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { NextRequest } from 'next/server';
 import {
+  asCaller,
   authenticateMock,
-  listAttestationsMock,
+  listAllAttestationsMock,
   publishedSurveyDocFixture as doc,
   readOwnerSurveyAssetMock,
   readPublicSurveyAssetMock,
   resetSurveyRouteMocks,
   routeParams as params,
 } from '@/test/helpers/survey-route-mocks';
+import { KernelAttestationError } from '@/lib/kernel/attestations';
 
 import { GET, OPTIONS } from '../route';
 
-function req(query = '') {
-  return new NextRequest(`https://dykil.imajin.ai/api/surveys/asset_1/responses/check${query}`);
+function checkRequest(query = '', headers: Record<string, string> = {}) {
+  return new Request(`https://dykil.imajin.ai/api/surveys/asset_1/responses/check${query}`, { headers });
 }
 
 describe('OPTIONS /api/surveys/:id/responses/check', () => {
   it('returns the shared CORS preflight response', async () => {
-    const response = await OPTIONS(req());
+    const response = await OPTIONS(new Request('https://dykil.imajin.ai/api/surveys/asset_1/responses/check') as never);
     expect(response.status).toBeLessThan(400);
   });
 });
@@ -26,79 +27,134 @@ describe('OPTIONS /api/surveys/:id/responses/check', () => {
 describe('GET /api/surveys/:id/responses/check', () => {
   beforeEach(() => {
     resetSurveyRouteMocks();
-    readPublicSurveyAssetMock.mockResolvedValue(doc);
-    readOwnerSurveyAssetMock.mockResolvedValue(null);
   });
 
-  it('returns completed:false for an anonymous caller with no ticketId', async () => {
+  it('requires authentication — the unauthenticated lookup was not carried over', async () => {
     authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
 
-    const response = await GET(req(), params('asset_1'));
-    const body = await response.json();
+    const response = await GET(checkRequest('?ticketId=tkt_1') as never, params('asset_1'));
 
-    expect(body).toEqual({ completed: false });
-    expect(listAttestationsMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(401);
+    expect(listAllAttestationsMock).not.toHaveBeenCalled();
   });
 
-  it("checks by the authenticated caller's own issuer_did", async () => {
-    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:respondent', scopes: [], via: 'token' } });
-    listAttestationsMock.mockResolvedValue([
-      { id: 'att_1', contextId: 'asset_1', issuerDid: 'did:imajin:respondent', payload: { answers: { q1: 'yes' } } },
+  it('requires the dykil:read scope', async () => {
+    authenticateMock.mockResolvedValue({ error: 'Missing required scope(s): dykil:read', status: 403 });
+
+    const response = await GET(checkRequest() as never, params('asset_1'));
+
+    expect(response.status).toBe(403);
+    expect(authenticateMock).toHaveBeenCalledWith(expect.anything(), { requireScopes: ['dykil:read'] });
+  });
+
+  it("checks by the authenticated caller's own issuer_did, forwarding their credentials", async () => {
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAllAttestationsMock.mockResolvedValue([
+      { id: 'att_1', type: 'dykil/survey-response', issuerDid: 'did:imajin:respondent', payload: { answers: { q1: 'yes' } } },
     ]);
 
-    const response = await GET(req('?include=answers'), params('asset_1'));
+    const response = await GET(checkRequest('', { authorization: 'Bearer respondent-token' }) as never, params('asset_1'));
     const body = await response.json();
 
-    expect(body.completed).toBe(true);
-    expect(body.responseId).toBe('att_1');
-    expect(body.answers).toEqual({ q1: 'yes' });
-
-    const [query] = listAttestationsMock.mock.calls[0];
-    expect(query.issuerDid).toBe('did:imajin:respondent');
+    expect(body).toEqual({ completed: true, responseId: 'att_1' });
+    expect(listAllAttestationsMock).toHaveBeenCalledWith(
+      { subjectDid: 'did:imajin:owner', contextId: 'asset_1', issuerDid: 'did:imajin:respondent', ref: undefined },
+      { authorization: 'Bearer respondent-token' },
+    );
   });
 
-  it('checks by ticketId without requiring authentication, and never reads raw ticket rows', async () => {
-    authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
-    listAttestationsMock
-      .mockResolvedValueOnce([]) // respondent-signed (issuerDid undefined -> broad fetch)
-      .mockResolvedValueOnce([{ id: 'att_legacy', contextId: 'asset_1', payload: { ticketId: 'tkt_1' } }]);
+  it('includes the stored answers only when asked', async () => {
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAllAttestationsMock.mockResolvedValue([
+      { id: 'att_1', type: 'dykil/survey-response', issuerDid: 'did:imajin:respondent', payload: { answers: { q1: 'yes' } } },
+    ]);
 
-    const response = await GET(req('?ticketId=tkt_1'), params('asset_1'));
+    const response = await GET(checkRequest('?include=answers') as never, params('asset_1'));
+
+    expect(await response.json()).toEqual({ completed: true, responseId: 'att_1', answers: { q1: 'yes' } });
+  });
+
+  it('reports null answers when a matching response carries none', async () => {
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAllAttestationsMock.mockResolvedValue([
+      { id: 'att_1', type: 'dykil/survey-response', issuerDid: 'did:imajin:respondent', payload: null },
+    ]);
+
+    const response = await GET(checkRequest('?include=answers') as never, params('asset_1'));
+
+    expect((await response.json()).answers).toBeNull();
+  });
+
+  it('checks by the indexed ref for ?ticketId=, never by scanning payloads or reading ticket rows', async () => {
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAllAttestationsMock.mockResolvedValue([
+      { id: 'att_other', type: 'dykil/survey-response', issuerDid: 'did:imajin:respondent', payload: { ticketId: 'tkt_2' } },
+      { id: 'att_tkt', type: 'dykil/survey-response-legacy-import', issuerDid: 'did:imajin:dykil-app', payload: { ticketId: 'tkt_1' } },
+    ]);
+
+    const response = await GET(checkRequest('?ticketId=tkt_1') as never, params('asset_1'));
     const body = await response.json();
 
-    expect(body).toEqual({ completed: true, responseId: 'att_legacy' });
+    expect(body).toEqual({ completed: true, responseId: 'att_tkt' });
+    expect(listAllAttestationsMock).toHaveBeenCalledWith(
+      { subjectDid: 'did:imajin:owner', contextId: 'asset_1', issuerDid: undefined, ref: 'tkt_1' },
+      {},
+    );
   });
 
   it('returns completed:false when no matching response exists', async () => {
-    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:respondent', scopes: [], via: 'token' } });
-    listAttestationsMock.mockResolvedValue([]);
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAllAttestationsMock.mockResolvedValue([]);
 
-    const response = await GET(req(), params('asset_1'));
+    const response = await GET(checkRequest() as never, params('asset_1'));
+
+    expect(await response.json()).toEqual({ completed: false });
+  });
+
+  it('ignores a response carrying a different issuer or an unrelated type', async () => {
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAllAttestationsMock.mockResolvedValue([
+      { id: 'att_x', type: 'dykil/survey-response', issuerDid: 'did:imajin:someone-else', payload: {} },
+    ]);
+
+    const response = await GET(checkRequest() as never, params('asset_1'));
+
     expect(await response.json()).toEqual({ completed: false });
   });
 
   it('404s when the survey does not exist', async () => {
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
     readPublicSurveyAssetMock.mockResolvedValue(null);
-    authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
+    readOwnerSurveyAssetMock.mockResolvedValue(null);
 
-    const response = await GET(req('?ticketId=tkt_1'), params('missing'));
+    const response = await GET(checkRequest() as never, params('missing'));
+
     expect(response.status).toBe(404);
   });
 
-  it('returns 500 when the kernel call fails unexpectedly', async () => {
-    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:respondent', scopes: [], via: 'token' } });
-    listAttestationsMock.mockRejectedValue(new Error('boom'));
+  it('surfaces a KernelAttestationError from the kernel as its own status', async () => {
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAllAttestationsMock.mockRejectedValue(new KernelAttestationError('Kernel rejected', 502, null));
 
-    const response = await GET(req(), params('asset_1'));
-    expect(response.status).toBe(500);
+    const response = await GET(checkRequest() as never, params('asset_1'));
+
+    expect(response.status).toBe(502);
   });
 
-  it('surfaces a KernelAttestationError from the kernel as its own status', async () => {
-    authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:respondent', scopes: [], via: 'token' } });
-    const { KernelAttestationError } = await import('@/lib/kernel/attestations');
-    listAttestationsMock.mockRejectedValue(new KernelAttestationError('Kernel down', 502, null));
+  it('returns 500 when the check fails unexpectedly', async () => {
+    authenticateMock.mockResolvedValue(asCaller('did:imajin:respondent'));
+    readPublicSurveyAssetMock.mockResolvedValue(doc);
+    listAllAttestationsMock.mockRejectedValue(new Error('boom'));
 
-    const response = await GET(req(), params('asset_1'));
-    expect(response.status).toBe(502);
+    const response = await GET(checkRequest() as never, params('asset_1'));
+
+    expect(response.status).toBe(500);
   });
 });

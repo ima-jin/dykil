@@ -26,7 +26,11 @@ components:
       description: >
         Scoped app token minted via POST {kernel}/auth/api/tokens/app,
         verified by this app's single authenticate() interface
-        (src/lib/auth/authenticate.ts).
+        (src/lib/auth/authenticate.ts, `requireSessionOrAppToken`). Read
+        routes need the `dykil:read` scope, mutating routes `dykil:write`;
+        scopes are enforced only on this token path. The same Authorization
+        header is forwarded to the kernel's media and attestation services,
+        which authenticate it themselves.
     cookieAuth:
       type: apiKey
       in: cookie
@@ -44,9 +48,23 @@ components:
           type: object
           properties:
             elements: { type: array, items: { type: object } }
-        settings: { type: object }
+        settings:
+          type: object
+          description: >
+            `multipleResponses` (boolean) and `eventId` (string, ticket-gates
+            the survey). `allowAnonymous` is not supported — every response is
+            signed (imajin-ai#2536) — and is dropped if sent.
+          properties:
+            multipleResponses: { type: boolean }
+            eventId: { type: string }
         type: { type: string, enum: [survey, pre-event, post-event, form] }
-        status: { type: string, enum: [draft, published, closed] }
+        status:
+          type: string
+          enum: [draft, published, closed]
+          description: >
+            Only a published survey's asset is `public`; draft and closed are
+            `private`. Changing status moves the asset's access level with
+            PATCH /media/api/assets/{id}/access.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     Attestation:
@@ -57,6 +75,7 @@ components:
         subjectDid: { type: string }
         type: { type: string }
         contextId: { type: string, nullable: true }
+        ref: { type: string, nullable: true, description: "Indexed lookup key — the ticketId, when the response has one." }
         payload: { type: object }
         issuedAt: { type: string, format: date-time }
     Error:
@@ -133,9 +152,27 @@ paths:
           description: OpenAPI YAML document
 
   /api/surveys:
+    get:
+      operationId: listSurveys
+      summary: List the caller's own surveys (same as /api/surveys/mine). Requires `dykil:read`.
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      responses:
+        "200":
+          description: Surveys list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  surveys: { type: array, items: { $ref: "#/components/schemas/Survey" } }
+        "401":
+          description: Unauthorized
+        "403":
+          description: Token missing the `dykil:read` scope
     post:
       operationId: createSurvey
-      summary: Create a survey (a signed media-asset document owned by the caller)
+      summary: Create a survey (a signed media-asset document owned by the caller). Requires `dykil:write`.
       tags: [dykil]
       security: [{ appToken: [] }, { cookieAuth: [] }]
       requestBody:
@@ -166,7 +203,9 @@ paths:
   /api/surveys/mine:
     get:
       operationId: listMySurveys
-      summary: List the caller's own surveys
+      summary: >
+        List the caller's own surveys — the kernel's asset list filtered by
+        context_app=dykil&context_feature=survey. Requires `dykil:read`.
       tags: [dykil]
       security: [{ appToken: [] }, { cookieAuth: [] }]
       responses:
@@ -193,7 +232,10 @@ paths:
   /api/surveys/{id}:
     get:
       operationId: getSurvey
-      summary: Get survey by id. Published surveys are public; drafts require ownership.
+      summary: >
+        Get survey by id. Published surveys are public; drafts and closed
+        surveys are genuinely private and require ownership. Authentication is
+        optional (`dykil:read` when a token is presented).
       tags: [dykil]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -208,7 +250,7 @@ paths:
           description: Not found (or unpublished and not owner)
     put:
       operationId: updateSurvey
-      summary: Update survey (owner only)
+      summary: Update survey (owner only). Requires `dykil:write`. A status change flips the asset's access level.
       tags: [dykil]
       security: [{ appToken: [] }, { cookieAuth: [] }]
       parameters:
@@ -227,7 +269,7 @@ paths:
           description: Survey not found
     delete:
       operationId: deleteSurvey
-      summary: Delete survey (owner only)
+      summary: Delete survey (owner only). Requires `dykil:write`.
       tags: [dykil]
       security: [{ appToken: [] }, { cookieAuth: [] }]
       parameters:
@@ -243,7 +285,11 @@ paths:
   /api/surveys/{id}/respond:
     post:
       operationId: submitSurveyResponse
-      summary: Submit a respondent-signed response (an attestation, not a table row)
+      summary: >
+        Submit a respondent-signed response (an attestation, not a table row).
+        Requires `dykil:write`. There is no anonymous path. A respondent holds
+        one active response unless the survey sets `multipleResponses`; to edit,
+        send `supersedes`.
       tags: [dykil]
       security: [{ appToken: [] }, { cookieAuth: [] }]
       parameters:
@@ -257,7 +303,17 @@ paths:
               required: [answers, issuedAt, signature]
               properties:
                 answers: { type: object }
-                ticketId: { type: string }
+                ticketId:
+                  type: string
+                  maxLength: 256
+                  description: Recorded in the signed payload and as the attestation's indexed `ref`.
+                supersedes:
+                  type: string
+                  description: >
+                    Id of the caller's own earlier response this one replaces.
+                    Sent inside the signed payload (`payload.supersedes`), so
+                    the signature must cover it. The kernel retires the earlier
+                    attestation only if the same DID issued it.
                 issuedAt:
                   type: integer
                   description: Unix ms timestamp, part of the signed canonical payload
@@ -265,7 +321,7 @@ paths:
                   type: string
                   description: >
                     Ed25519 signature (hex) by the respondent's own DID key over
-                    canonicalResponsePayload(...) — see FINDINGS.md gap #2394.
+                    canonicalResponsePayload(...). This app never holds that key.
       responses:
         "201":
           description: Response recorded as an attestation
@@ -281,18 +337,36 @@ paths:
         "403":
           description: Survey not accepting responses, or ticket gate denied
         "404":
-          description: Survey not found
+          description: Survey not found, or `supersedes` is not one of the caller's own active responses
+        "409":
+          description: >
+            The caller already has an active response and the survey does not
+            allow multiple; the body carries `responseId` to edit with `supersedes`.
         "501":
-          description: Ticket gate not configured (see FINDINGS.md gap #2395)
+          description: Ticket gate not configured (EVENTS_SERVICE_URL / DYKIL_EVENTS_AUTHORIZATION_ID)
+        "502":
+          description: Ticket gate unavailable (the events app or the gate token mint refused)
 
   /api/surveys/{id}/responses:
     get:
       operationId: getSurveyResponses
-      summary: All responses for a survey, as attestations (owner only)
+      summary: >
+        A survey's responses, as attestations (owner only). Requires
+        `dykil:read`. Withdrawn (revoked) and superseded (edited) responses are
+        not listed. Without `limit`/`cursor` every page is followed (the
+        export); with them, one page.
       tags: [dykil]
       security: [{ appToken: [] }, { cookieAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+          description: Return a single page of at most this many rows (capped at 100).
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: The `nextCursor` of the previous page.
       responses:
         "200":
           description: Responses
@@ -302,7 +376,10 @@ paths:
                 type: object
                 properties:
                   responses: { type: array, items: { $ref: "#/components/schemas/Attestation" } }
-                  total: { type: integer }
+                  total: { type: integer, description: "Export mode only." }
+                  nextCursor: { type: string, nullable: true, description: "Paged mode only; null on the last page." }
+        "400":
+          description: Invalid `limit`
         "403":
           description: Not the survey owner
         "404":
@@ -312,19 +389,22 @@ paths:
     get:
       operationId: checkSurveyResponse
       summary: >
-        Has the caller (or a given ticket) already responded? Replaces the
-        original by-ticket row read — never returns raw ticket data.
+        Has the caller (or a given ticket) already responded? Requires
+        authentication and `dykil:read`. Replaces the original by-ticket row
+        read — never returns raw ticket data. The ticket form looks up the
+        attestation's indexed `ref`; rows are disclosure-gated, so a caller only
+        matches their own responses (the survey owner matches any).
       tags: [dykil]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - name: ticketId
           in: query
           schema: { type: string }
-          description: Ticket-scoped check (no auth required)
+          description: Ticket-scoped check, by the attestation `ref`
         - name: include
           in: query
           schema: { type: string, enum: [answers] }
-      security: [{ appToken: [] }, { cookieAuth: [] }, {}]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
       responses:
         "200":
           description: Response check result
@@ -336,3 +416,35 @@ paths:
                   completed: { type: boolean }
                   responseId: { type: string }
                   answers: { type: object }
+        "401":
+          description: Unauthorized
+
+  /api/surveys/{id}/responses/{responseId}:
+    delete:
+      operationId: withdrawSurveyResponse
+      summary: >
+        Withdraw your own response. Requires `dykil:write`. Relays to the
+        kernel's issuer-only POST /api/attestations/{id}/revoke: the response
+        drops out of every default read; the signed record is not erased.
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: responseId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Withdrawn
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked: { type: boolean }
+                  id: { type: string }
+                  revokedAt: { type: string, format: date-time }
+        "403":
+          description: Not the response's issuer (kernel)
+        "404":
+          description: Survey not found, or not one of the caller's own active responses to it
+        "409":
+          description: Already withdrawn (kernel)
