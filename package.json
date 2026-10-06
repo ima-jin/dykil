@@ -11,7 +11,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "import-legacy": "tsx scripts/import-legacy.ts"
+    "import-legacy": "tsx scripts/import-legacy.ts",
+    "check-env": "node scripts/check-env.mjs",
+    "baseline": "node --env-file=.env.local scripts/legacy-baseline.mjs",
+    "deploy:dev": "scripts/deploy.sh dev",
+    "deploy:prod": "scripts/deploy.sh prod"
   },
   "dependencies": {
     "@ima-jin/auth": "^0.8.7",

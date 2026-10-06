@@ -55,7 +55,7 @@ export default defineConfig({
       // coverage report only lists files matched by `include`, none of that
       // coverage was ever surfaced to SonarCloud; the file silently read as
       // 0% covered instead.
-      include: ['app/**/*.ts', 'app/**/*.tsx', 'src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.ts'],
+      include: ['app/**/*.ts', 'app/**/*.tsx', 'src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.ts', 'scripts/lib/**/*.mjs'],
       exclude: [
         '**/__tests__/**',
         '**/*.test.ts',
