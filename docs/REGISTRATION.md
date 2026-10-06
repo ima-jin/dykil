@@ -53,6 +53,38 @@ code** exactly once (`data.claimCode` on the `/jin` decision card). Copy it imme
 it cannot be retrieved again; if it's lost or expires unused, the operator re-approves
 `apps.provision` with `reissueClaim: true` for a fresh one.
 
+### The operator path (recommended): paste the code in the browser
+
+Open `<this app's URL>/claim` and paste the claim code (and the app DID, if the card shows one, to
+confirm you're claiming the right app). Submit — no ssh, no env file edit, no restart. This app's
+own `app/api/claim/route.ts` calls the kernel's `POST /api/apps/claim` on your behalf, writes the
+local bootstrap keystore (`IMAJIN_APP_KEYSTORE`, default `./.imajin/keystore.json`, mode `0600`),
+and hot-swaps the in-memory signing identity immediately. `/claim` 404s once this succeeds; the
+code is spent and cannot be reused.
+
+This is only possible because this app boots in **unclaimed mode** (imajin-ai#2427) when neither a
+keystore nor `IMAJIN_APP_CLAIM_CODE` is present: instead of crashing at boot, every route except
+`/claim`, `/api/claim`, and `/api/health` serves a minimal "not claimed yet" page, and
+`/api/health` reports `{ claimed: false }`.
+
+### Proxy trust assumption (rate limiting on `/claim`)
+
+`POST /api/claim` is rate limited per client address, and the only address it trusts is the
+**last** hop of `X-Forwarded-For` — the one appended by this app's own front door. That is only
+sound if both of these hold:
+
+- **The front door must set `X-Forwarded-For`.** Caddy's `reverse_proxy` does this by default
+  (with no `trusted_proxies` configured, it discards any client-supplied value and appends the
+  real peer address). Any other proxy must be configured to do the same. `x-real-ip` is never
+  consulted — a proxy does not overwrite it, so it is fully client-controlled.
+- **The app port must not be directly reachable.** Bind it to localhost or a private network
+  and firewall it, so every request arrives through the front door. A client that can reach the
+  port directly can send any `X-Forwarded-For` it likes and sidestep the per-address limit.
+
+Without a usable `X-Forwarded-For`, all callers share one coarse fallback bucket.
+
+### The advanced / CI path: an env var
+
 On this app's own first boot, `loadAppSigningKey()` mints its own Ed25519 "bootstrap" keypair,
 exchanges the claim code plus that keypair's public half for the real signing key via
 `POST /api/apps/claim`, and persists ONLY the bootstrap keypair (never the signing key) in a
@@ -80,7 +112,7 @@ cp .env.example .env.local
 #   IMAJIN_KERNEL_URL=<kernel node>          (e.g. https://dev-jin.imajin.ai)
 #   IMAJIN_APP_DID=<appDid from step 1>
 #   NEXT_PUBLIC_IMAJIN_APP_ID=<id from step 1>
-#   IMAJIN_APP_CLAIM_CODE=<the one-time claim code from step 2 — first boot only>
+#   IMAJIN_APP_CLAIM_CODE=<optional — leave unset and claim via <app>/claim in the browser instead>
 #   AUTH_SERVICE_URL=<kernel node>/auth      (e.g. https://dev-jin.imajin.ai/auth)
 #   MEDIA_SERVICE_URL=<kernel node>/media    (e.g. https://dev-jin.imajin.ai/media)
 # IMAJIN_APP_KEYSTORE is optional (defaults to ./.imajin/keystore.json) — never commit it

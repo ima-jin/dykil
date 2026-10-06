@@ -27,10 +27,10 @@ genuine respondent-signed ones in the data, and never upgraded.
    signing key and a one-time claim code — this app never holds its own private key in an env file
    (refs [imajin-ai#2411](https://github.com/ima-jin/imajin-ai/issues/2411)).
 2. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_KERNEL_URL`, `IMAJIN_APP_DID`,
-   `NEXT_PUBLIC_IMAJIN_APP_ID`, `AUTH_SERVICE_URL`, `MEDIA_SERVICE_URL`, and (first boot only)
-   `IMAJIN_APP_CLAIM_CODE`. This app refuses to start without a signing key it can fetch via
-   `loadAppSigningKey()` (see `instrumentation.ts`), and fails loud if a raw `DYKIL_APP_PRIVATE_KEY`
-   is still set.
+   `NEXT_PUBLIC_IMAJIN_APP_ID`, `AUTH_SERVICE_URL`, and `MEDIA_SERVICE_URL`. This app refuses to
+   start on a raw `DYKIL_APP_PRIVATE_KEY` still being set. **Skip `IMAJIN_APP_CLAIM_CODE` for
+   now** — without a keystore or claim code, this app boots in "unclaimed" mode (imajin-ai#2427):
+   approve on `/jin` → open `<this app>/claim` → paste the code → done.
 3. **Install dependencies** — `@ima-jin/auth`, `@ima-jin/auth-client`, `@ima-jin/config`, and `@ima-jin/logger`
    are published to npmjs.org under the `@ima-jin` scope. Anonymous install, no token needed:
    ```bash
@@ -48,12 +48,14 @@ genuine respondent-signed ones in the data, and never upgraded.
    intact). Locally: `http://localhost:3101/dykil` — `/dykil/api/health` and `/dykil/api/spec`
    respond immediately.
 
-## The 10 routes
+## The routes
 
 | Route | What |
 |---|---|
-| `GET /api/health` | health check |
+| `GET /api/health` | health check (reports `claimed`, imajin-ai#2427) |
 | `GET /api/spec` | this app's own OpenAPI document |
+| `GET /claim` | operator-facing claim page (unclaimed boot mode only, imajin-ai#2427) |
+| `POST /api/claim` | redeem this app's one-time claim code (unclaimed boot mode only) |
 | `POST /api/surveys` | create a survey (a signed media-asset document) |
 | `GET /api/surveys/mine` | list the caller's own surveys |
 | `GET /api/surveys/handle/:handle` | published surveys by handle (unimplemented stub — no public handle→DID resolver exists; see `FINDINGS.md`) |
@@ -102,7 +104,11 @@ scripts/
   import-legacy.ts  <- one-pass legacy backport, dry-run by default
 api-spec/          <- this app's own OpenAPI document, served at /api/spec
 instrumentation.ts <- refuses to boot without a fetchable signing key (loadAppSigningKey())
+middleware.ts      <- gates every route on claim state — unclaimed page, /claim 404 once claimed (imajin-ai#2427)
 ```
+
+`app/claim/page.tsx` + `app/api/claim/route.ts` are the operator-facing claim page and its server
+route (imajin-ai#2427) — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
 
 ## The honest test
 
