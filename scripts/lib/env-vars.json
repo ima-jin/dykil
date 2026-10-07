@@ -150,7 +150,7 @@
     "name": "NEXT_PUBLIC_BASE_PATH",
     "status": "runtime-set",
     "phase": "build",
-    "summary": "Reverse-proxy path prefix (`/dykil`). Set by next.config.js at build time — not an env-file value. The Caddy route forwards the prefix intact.",
+    "summary": "Reverse-proxy path prefix (`/dykil`). Set by next.config.mjs at build time — not an env-file value. The Caddy route forwards the prefix intact.",
     "dev": "/dykil",
     "prod": "/dykil"
   },

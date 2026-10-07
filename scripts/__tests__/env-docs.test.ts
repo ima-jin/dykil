@@ -53,7 +53,7 @@ describe('env contract coverage', () => {
       ...walk(join(ROOT, 'src')),
       ...walk(join(ROOT, 'scripts')),
       join(ROOT, 'instrumentation.ts'),
-      join(ROOT, 'next.config.js'),
+      join(ROOT, 'next.config.mjs'),
       join(ROOT, 'middleware.ts'),
       join(ROOT, 'ecosystem.config.cjs'),
     ];

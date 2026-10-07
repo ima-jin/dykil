@@ -23,7 +23,7 @@ import { withBasePath } from '@/lib/base-path';
 export const config = {
   runtime: 'nodejs',
   // Two patterns, not one: with this app's non-empty `basePath` ('/dykil',
-  // see next.config.js), Next's compiled matcher wraps the catch-all
+  // see next.config.mjs), Next's compiled matcher wraps the catch-all
   // capture group in a mandatory leading `/`, so the bare basePath root (no
   // trailing path segment, e.g. `/dykil` with no trailing slash) fails to
   // match `'/((?!…).*)'` alone and middleware silently never runs for it.

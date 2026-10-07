@@ -91,14 +91,14 @@ Setting any of these is an error.
 
 ## Set by the platform — not in the env file
 
-Provided by pm2 (`ecosystem.config.cjs`), Next.js or `next.config.js`.
+Provided by pm2 (`ecosystem.config.cjs`), Next.js or `next.config.mjs`.
 
 | Variable | When | Dev | Prod | What it does |
 |---|---|---|---|---|
 | `PORT` | runtime | `3101` | `7101` | Listen port. Set by the pm2 ecosystem entry (prod 7101, dev 3101); only used directly by `pnpm dev`. |
 | `NODE_ENV` | runtime | `production` | `production` | Set to `production` by the pm2 entry and by `next build`/`next start`. Do not set it in the env file. |
 | `NEXT_RUNTIME` | runtime | (set by Next.js) | (set by Next.js) | Injected by Next.js; instrumentation.ts only bootstraps the signing key when it is `nodejs`. Never set by hand. |
-| `NEXT_PUBLIC_BASE_PATH` | build | `/dykil` | `/dykil` | Reverse-proxy path prefix (`/dykil`). Set by next.config.js at build time — not an env-file value. The Caddy route forwards the prefix intact. |
+| `NEXT_PUBLIC_BASE_PATH` | build | `/dykil` | `/dykil` | Reverse-proxy path prefix (`/dykil`). Set by next.config.mjs at build time — not an env-file value. The Caddy route forwards the prefix intact. |
 
 ## Read by dependencies on paths dykil does not use
 
