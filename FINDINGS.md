@@ -128,10 +128,28 @@ what step 2 found.
    refused. It also doesn't yet record the legacy-id to asset-id map #2522 needs.
 5. **Respondent signing is still caller-side.** The respondent must produce the Ed25519 signature
    over `canonicalResponsePayload(...)` itself, including `supersedes` for an edit (#2394 gap, unchanged).
-6. **No UI yet.** Create, dashboard, results, respond, handle and embed pages are not part of this PR.
+6. **No UI yet.** *(Closed by #2719: every screen is ported, see docs/ARCHITECTURE.md "UI".)*
 
 `DECISION · edit semantics · attestations are immutable, the original upserted a response per
 (survey, respondent) · a) one active response per respondent unless settings.multipleResponses; an
 edit is a new response with payload.supersedes (409 otherwise) b) always allow many, never supersede
 c) block edits · rec: a — matches the original's one-row-per-respondent default, uses the kernel's
 supersession chain, and keeps the signed record of every prior version readable by id.`
+
+## Step 2b update (refs #2719) — UI parity
+
+The kernel app's screens are ported onto the primitives (docs/ARCHITECTURE.md, "UI"). What the port found:
+
+- **Respondent signing has no browser path** — the UI degrades to "sign the payload yourself, paste the signature", via a
+  new `POST /api/surveys/{id}/respond/prepare`. → [imajin-ai#2720](https://github.com/ima-jin/imajin-ai/issues/2720)
+- **Handle listing needs a session** — handle→DID works now (`/profile/api/profile/{handle}`); listing another DID's public
+  assets does not answer anonymously. → [imajin-ai#2721](https://github.com/ima-jin/imajin-ai/issues/2721)
+- **The events access gate counts `sold`/`used`; the events app writes `valid`** (`confirm-payment.ts`,
+  `free-checkout-helpers.ts`). A ticket-gated survey therefore blocks paid and free ticket holders alike until events is
+  fixed. Not patched here — the gate is the events app's.
+- **Legacy survey ids in existing embeds** (`events.registration_form_id` = `survey_…`) resolve the route but find no
+  survey until the import records the old→new id map (#2522, step 4).
+- `DECISION · respondent signing · The browser cannot sign a response · a) paste-a-signature step now, wait for a kernel
+  signer b) adopt #2394's delegated attestation (app signs, `delegator_did` = respondent) once #2400's consent UI exists
+  c) node-witnessed signing for session users · rec: a — it keeps "every new response is respondent-signed" true today;
+  b is the likely end-state and needs a ruling that a delegated response counts as respondent-signed.`

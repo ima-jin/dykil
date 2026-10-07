@@ -77,16 +77,50 @@ carried both in the signed payload and as the attestation's indexed `ref` (not p
   incoming settings. Reads are `disclosure_scope`-gated, so every kernel call carries the caller's own
   credentials.
 
+## UI (refs #2719)
+
+Every screen the kernel's `apps/dykil` served resolves under `basePath` `/dykil`, rebuilt on the primitives above and
+this app's own `api/` routes (reference: `ima-jin/imajin-ai` @ `8500583197b34d3a2dfeb13208562d5bfa1ffe53`,
+`apps/dykil/app/`). The shared `@ima-jin/ui` NavBar / toasts / footer are used; no kernel component is copied.
+
+| Route | Screen |
+|-------|--------|
+| `/` | landing: what dykil is, sign in, my surveys, create |
+| `/create`, `/create?id=<id>` | survey / poll builder (signed document through `POST/PUT /api/surveys`) |
+| `/dashboard` | the owner's surveys, response counts, share link, edit, delete |
+| `/survey/[id]` | take a survey (the shape `Copy Link` produces) |
+| `/survey/[id]/results` | owner results: aggregates over the response attestations, individual responses, CSV |
+| `/[handle]`, `/[handle]/[surveyId]` | a handle's published surveys; the old `<handle>/<id>` link shape (the id decides) |
+| `/embed/[surveyId]` | chrome-free embed for events pages (`?ticketId=`, `?parentOrigin=`; `survey-height` / `survey-completed` postMessage protocol unchanged) |
+
+Screens live in `src/components`, pages in `app/(chrome)` (with the NavBar) and `app/(bare)` (embed, no chrome) are thin.
+The browser talks only to this app's `/api/*`; the browser-side journey is `src/lib/client/*`.
+
+**Respondent signing degrades gracefully.** A response must be signed by its respondent's own key and a signed-in browser
+session holds none (no SDK signing helper exists; see imajin-ai#2720). So the respondent flow is
+answer → `POST /api/surveys/{id}/respond/prepare` (returns the exact canonical bytes to sign, which embed the survey's
+content hash) → the respondent signs with their own DID key and pastes the signature → `POST /respond`. The app never
+signs for a respondent. `/respond/prepare` and `/respond` build the signed payload with the same function
+(`buildRespondentPayload`), so what is signed cannot drift from what the kernel verifies.
+
+**Ticket-gated surveys** (`settings.eventId`): `GET /api/surveys/{id}/gate` asks the events boolean gate about the
+caller's own DID before the form is shown, and `/respond` enforces it again. Never a ticket row.
+
+**Public handle listing**: `GET /api/surveys/handle/{handle}` resolves the handle through the kernel's public profile API,
+then lists that DID's `public` survey assets. The media list needs a signed-in caller (imajin-ai#2721), so a signed-out
+visitor sees a sign-in prompt.
+
 ## Known simplifications (honest, not hidden)
 
 - **Scopes and audiences.** Routes require `dykil:read` / `dykil:write` on the token path, but the kernel can't
   yet grant them, and a token minted for dykil is not accepted by the media routes — see
   [ima-jin/imajin-ai#2663](https://github.com/ima-jin/imajin-ai/issues/2663). The shared session cookie works
   today.
-- **No public handle→DID resolver exists** (checked `auth.yaml`, `registry.yaml`, `profile.yaml`). The
-  `/api/surveys/handle/:handle` route was already an unimplemented stub in the original `apps/dykil` for the same
-  reason. Filed as [ima-jin/imajin-ai#2397](https://github.com/ima-jin/imajin-ai/issues/2397).
-- **Respondent signing is caller-side.** This app never holds a respondent's key.
+- **Handle listing needs a session.** The handle→DID resolver exists (`GET /profile/api/profile/{handle}`,
+  [imajin-ai#2397](https://github.com/ima-jin/imajin-ai/issues/2397)), and `/api/surveys/handle/:handle` now uses it, but the
+  media list of another DID's public assets is authenticated: [imajin-ai#2721](https://github.com/ima-jin/imajin-ai/issues/2721).
+- **Respondent signing is caller-side.** This app never holds a respondent's key, so the UI asks the respondent to paste
+  a signature they produced themselves ([imajin-ai#2720](https://github.com/ima-jin/imajin-ai/issues/2720)).
 
 ## Deploy convention
 

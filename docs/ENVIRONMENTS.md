@@ -75,6 +75,10 @@ Read by the app, its dependencies or its scripts, and safe to leave unset (the d
 | `LEGACY_DATABASE_URL` **(secret)** | script | `postgres://<read-only role>:<password>@localhost:5432/<dev_db>` | `postgres://<read-only role>:<password>@localhost:5432/<prod_db>` | Connection string for the OLD dykil.* Postgres schema, via a READ-ONLY role. Read only by scripts/legacy-baseline.mjs (deploy step 6) and scripts/import-legacy.ts — never at request time. Unset it once the legacy data is retired. |
 | `NEXT_PUBLIC_SERVICE_PREFIX` | build | (unset) | (unset) | Read by @ima-jin/config to derive service URLs. dykil takes every service URL from its own env vars; leave unset. |
 | `NEXT_PUBLIC_DOMAIN` | build | (unset) | (unset) | Companion to NEXT_PUBLIC_SERVICE_PREFIX (default imajin.ai). Leave unset. |
+| `NEXT_PUBLIC_NOTIFY_URL` | build | (unset) | (unset) | Read by the shared @ima-jin/ui NavBar for its notification bell. dykil has no notifications of its own; leave unset. |
+| `NEXT_PUBLIC_VERSION` | build | (unset) | (unset) | Read by @ima-jin/ui's build-info footer line. Optional cosmetic build stamp; leave unset. |
+| `NEXT_PUBLIC_BUILD_HASH` | build | (unset) | (unset) | Companion to NEXT_PUBLIC_VERSION: commit hash shown in the @ima-jin/ui build-info line. Leave unset. |
+| `NEXT_PUBLIC_COMMIT_COUNT` | build | (unset) | (unset) | Companion to NEXT_PUBLIC_VERSION: commit count shown in the @ima-jin/ui build-info line. Leave unset. |
 | `LOG_LEVEL` | runtime | `debug` | `info` | pino log level for @ima-jin/logger (default info). Output is stdout only; pm2 captures it. |
 | `ENABLE_REQUEST_LOG` | runtime | (unset) | (unset) | Logger request-log switch. Leave unset: this app wires no log sink (AGENTS.md — stdout only). |
 | `ENABLE_APP_LOG` | runtime | (unset) | (unset) | Logger persisted-log switch. Leave unset: this app never persists logs to a database. |

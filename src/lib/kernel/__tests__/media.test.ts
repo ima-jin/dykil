@@ -4,6 +4,7 @@ import {
   deleteSurveyAsset,
   KernelMediaError,
   listMySurveyAssets,
+  listPublicSurveyAssets,
   readOwnerSurveyAsset,
   readPublicSurveyAsset,
   setSurveyAssetAccess,
@@ -180,5 +181,29 @@ describe('kernel media client', () => {
     const error = new KernelMediaError('boom', 500, { error: 'boom' });
     expect(error.status).toBe(500);
     expect(error.body).toEqual({ error: 'boom' });
+  });
+
+  describe('listPublicSurveyAssets', () => {
+    it("lists another identity's surveys with did= and the survey upload context, forwarding the caller's credentials", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ assets: [{ id: 'a1' }] }) });
+      vi.stubGlobal('fetch', fetchMock);
+      const request = new Request('https://dykil.imajin.ai/api/surveys/handle/alice', { headers: { cookie: 'imajin_session=abc' } });
+
+      const assets = await listPublicSurveyAssets('did:imajin:alice', request);
+
+      expect(assets).toEqual([{ id: 'a1' }]);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(new URL(String(url)).searchParams.get('did')).toBe('did:imajin:alice');
+      expect(new URL(String(url)).searchParams.get('context_app')).toBe('dykil');
+      expect(new URL(String(url)).searchParams.get('context_feature')).toBe('survey');
+      expect(init.headers).toEqual({ cookie: 'imajin_session=abc' });
+    });
+
+    it("listMySurveyAssets sends no did= (the caller's own surveys)", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ assets: [] }) });
+      vi.stubGlobal('fetch', fetchMock);
+      await listMySurveyAssets(new Request('https://dykil.imajin.ai/api/surveys'));
+      expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.has('did')).toBe(false);
+    });
   });
 });

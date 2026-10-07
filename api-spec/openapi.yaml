@@ -218,16 +218,59 @@ paths:
                 properties:
                   surveys: { type: array, items: { $ref: "#/components/schemas/Survey" } }
 
+  /api/session:
+    get:
+      operationId: getSession
+      summary: >
+        Who is calling? `{ did }` for the signed-in caller, 401 otherwise. Requires
+        `dykil:read`. The pages use it to choose between "sign in" and the app.
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      responses:
+        "200":
+          description: The caller's own DID
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [did]
+                properties:
+                  did: { type: string }
+        "401": { description: Not signed in }
+
   /api/surveys/handle/{handle}:
     get:
       operationId: getSurveysByHandle
-      summary: Get published surveys by handle (unimplemented stub — see FINDINGS.md gap #2397)
+      summary: >
+        A handle's published surveys. The handle is resolved to a DID through the
+        kernel's public profile API (`GET /profile/api/profile/{handle}`), then that
+        DID's `public` survey documents are listed (`GET /media/api/assets?did=`) and
+        each is kept only if it is a published survey the DID owns. Needs a signed-in
+        caller (the media list does); an anonymous caller gets the kernel's 401.
       tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
       parameters:
         - { name: handle, in: path, required: true, schema: { type: string } }
       responses:
         "200":
-          description: Always an empty list today
+          description: The handle's published surveys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  handle: { type: string }
+                  surveys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        description: { type: string, nullable: true }
+                        createdAt: { type: string }
+        "401": { description: Not signed in }
+        "404": { description: No such handle }
 
   /api/surveys/{id}:
     get:
@@ -346,6 +389,74 @@ paths:
           description: Ticket gate not configured (EVENTS_SERVICE_URL / DYKIL_EVENTS_AUTHORIZATION_ID)
         "502":
           description: Ticket gate unavailable (the events app or the gate token mint refused)
+
+  /api/surveys/{id}/respond/prepare:
+    post:
+      operationId: prepareSurveyResponse
+      summary: >
+        What must the respondent sign? Validates the answers against the survey exactly
+        as `/respond` will, then returns the canonical bytes (they embed the survey's
+        content hash, which only the server can compute), the `issuedAt` that is part of
+        them, and the payload. Nothing is stored. The respondent signs `canonical` with
+        their own DID key and sends the signature, with the same `issuedAt`, to
+        `/respond`. Requires `dykil:write`.
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              properties:
+                answers: { type: object, additionalProperties: true }
+                ticketId: { type: string, maxLength: 256 }
+                supersedes: { type: string, description: The respondent's own earlier response id (an edit) }
+      responses:
+        "200":
+          description: The bytes to sign
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [canonical, issuedAt, payload]
+                properties:
+                  canonical: { type: string }
+                  issuedAt: { type: integer, description: ms epoch }
+                  payload: { type: object, additionalProperties: true }
+        "400": { description: Invalid body or a required answer is missing }
+        "403": { description: The survey is not accepting responses }
+        "404": { description: Survey not found }
+
+  /api/surveys/{id}/gate:
+    get:
+      operationId: getSurveyGate
+      summary: >
+        May the caller respond? `{ gated: false, allowed: true }` for an open survey; for
+        a ticket-gated one (`settings.eventId`) the events app's boolean gate is asked
+        about the caller's own DID — never a ticket row. An unconfigured gate answers 501,
+        an unreachable one 502. Requires `dykil:read`.
+      tags: [dykil]
+      security: [{ appToken: [] }, { cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Gate result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [gated, allowed]
+                properties:
+                  gated: { type: boolean }
+                  allowed: { type: boolean }
+        "404": { description: Survey not found }
+        "501": { description: The ticket gate is not configured }
+        "502": { description: The ticket gate is unavailable }
 
   /api/surveys/{id}/responses:
     get:

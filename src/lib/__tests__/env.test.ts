@@ -8,6 +8,8 @@ const ENV_KEYS = [
   'DYKIL_LEGACY_IMPORT_ATTESTATION_TYPE',
   'NEXT_PUBLIC_APP_URL',
   'EVENTS_SERVICE_URL',
+  'IMAJIN_KERNEL_URL',
+  'PROFILE_SERVICE_URL',
   'DYKIL_EVENTS_AUTHORIZATION_ID',
 ] as const;
 
@@ -116,5 +118,20 @@ describe('src/lib/env', () => {
     expect(eventsGateAuthorizationId()).toBeUndefined();
     process.env.DYKIL_EVENTS_AUTHORIZATION_ID = 'att_consent_1';
     expect(eventsGateAuthorizationId()).toBe('att_consent_1');
+  });
+
+  it.each([
+    ['derives it from the kernel origin', { IMAJIN_KERNEL_URL: 'https://dev-jin.imajin.ai' }, 'https://dev-jin.imajin.ai/profile'],
+    ['ignores a trailing slash on the kernel origin', { IMAJIN_KERNEL_URL: 'https://jin.imajin.ai/' }, 'https://jin.imajin.ai/profile'],
+    ['lets PROFILE_SERVICE_URL override it', { IMAJIN_KERNEL_URL: 'https://x', PROFILE_SERVICE_URL: 'https://p.test/profile' }, 'https://p.test/profile'],
+  ])('profileServiceUrl %s', async (_label, vars, expected) => {
+    Object.assign(process.env, vars);
+    const { profileServiceUrl } = await import('@/lib/env');
+    expect(profileServiceUrl()).toBe(expected);
+  });
+
+  it('profileServiceUrl throws when neither the kernel origin nor an override is set', async () => {
+    const { profileServiceUrl } = await import('@/lib/env');
+    expect(() => profileServiceUrl()).toThrow('IMAJIN_KERNEL_URL is not set');
   });
 });

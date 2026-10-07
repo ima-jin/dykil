@@ -171,6 +171,38 @@
     "prod": "(unset)"
   },
   {
+    "name": "NEXT_PUBLIC_NOTIFY_URL",
+    "status": "optional",
+    "phase": "build",
+    "summary": "Read by the shared @ima-jin/ui NavBar for its notification bell. dykil has no notifications of its own; leave unset.",
+    "dev": "(unset)",
+    "prod": "(unset)"
+  },
+  {
+    "name": "NEXT_PUBLIC_VERSION",
+    "status": "optional",
+    "phase": "build",
+    "summary": "Read by @ima-jin/ui's build-info footer line. Optional cosmetic build stamp; leave unset.",
+    "dev": "(unset)",
+    "prod": "(unset)"
+  },
+  {
+    "name": "NEXT_PUBLIC_BUILD_HASH",
+    "status": "optional",
+    "phase": "build",
+    "summary": "Companion to NEXT_PUBLIC_VERSION: commit hash shown in the @ima-jin/ui build-info line. Leave unset.",
+    "dev": "(unset)",
+    "prod": "(unset)"
+  },
+  {
+    "name": "NEXT_PUBLIC_COMMIT_COUNT",
+    "status": "optional",
+    "phase": "build",
+    "summary": "Companion to NEXT_PUBLIC_VERSION: commit count shown in the @ima-jin/ui build-info line. Leave unset.",
+    "dev": "(unset)",
+    "prod": "(unset)"
+  },
+  {
     "name": "LOG_LEVEL",
     "status": "optional",
     "phase": "runtime",

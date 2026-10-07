@@ -1,5 +1,6 @@
 import { responseAttestationType, legacyImportAttestationType, DYKIL_SURVEY_CONTEXT_TYPE } from '@/lib/env';
 import { canonicalAttestationPayload, type AttestationInput } from '@/lib/kernel/attestations';
+import { computeDocHash, type SurveyDoc } from '@/lib/survey';
 
 /**
  * Every survey response is one of exactly two provenances, and the two must
@@ -87,4 +88,25 @@ export function canonicalResponsePayload(params: {
     payload: params.payload as unknown as Record<string, unknown>,
     issuedAt: params.issuedAt,
   });
+}
+
+/**
+ * The signed payload of a NEW (respondent-signed) response. One builder for
+ * both `/respond/prepare` (which tells the respondent what to sign) and
+ * `/respond` (which relays the signed result), so the bytes a respondent
+ * signs can never drift from the bytes the kernel verifies.
+ */
+export function buildRespondentPayload(params: {
+  doc: SurveyDoc;
+  answers: Record<string, unknown>;
+  ticketId: string | null;
+  supersedes: string | null;
+}): SurveyResponsePayload {
+  return {
+    provenance: 'respondent-signed',
+    docHash: computeDocHash(params.doc),
+    answers: params.answers,
+    ticketId: params.ticketId,
+    ...(params.supersedes ? { supersedes: params.supersedes } : {}),
+  };
 }

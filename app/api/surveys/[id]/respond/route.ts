@@ -10,13 +10,11 @@ import {
   type KernelAttestation,
 } from '@/lib/kernel/attestations';
 import { forwardedIdentityHeaders } from '@/lib/kernel/forward';
-import { buildResponseAttestationInput, type SurveyResponsePayload } from '@/lib/response-attestation';
+import { buildRespondentPayload, buildResponseAttestationInput } from '@/lib/response-attestation';
 import { listAllSurveyResponses } from '@/lib/responses';
-import { loadSurveyDoc } from '@/lib/route-helpers';
+import { enforceTicketGate, loadSurveyDoc } from '@/lib/route-helpers';
 import { corsHeaders, corsOptions, errorResponse, jsonResponse } from '@/lib/http';
-import { computeDocHash, findMissingRequiredField, type SurveyDoc } from '@/lib/survey';
-import { GateTokenUnavailableError } from '@/lib/events-gate-token';
-import { defaultTicketGate, TicketGateError, TicketGateNotConfiguredError } from '@/lib/ticket-gate';
+import { findMissingRequiredField, type SurveyDoc } from '@/lib/survey';
 
 const log = createLogger('dykil');
 
@@ -72,32 +70,6 @@ function parseRespondInput(body: Record<string, unknown>): ParsedRespondInput {
       supersedes: (supersedes as string | undefined) ?? null,
     },
   };
-}
-
-/**
- * Apply the ticket-holder gate when the survey is ticket-scoped. Returns the
- * error response to send, or null to continue. The gate answers a boolean;
- * this app never sees a ticket row.
- */
-async function checkTicketGate(
-  doc: SurveyDoc,
-  respondentDid: string,
-  cors: Record<string, string>,
-): Promise<NextResponse | null> {
-  if (!doc.settings.eventId) return null;
-  try {
-    const hasAccess = await defaultTicketGate().hasAccess({ eventId: doc.settings.eventId, did: respondentDid });
-    return hasAccess ? null : errorResponse('A ticket for this event is required to respond', 403, cors);
-  } catch (gateError) {
-    if (gateError instanceof TicketGateNotConfiguredError) {
-      return errorResponse(gateError.message, 501, cors);
-    }
-    if (gateError instanceof TicketGateError || gateError instanceof GateTokenUnavailableError) {
-      log.error({ err: gateError.message }, 'Ticket gate unavailable');
-      return errorResponse('The ticket gate is unavailable', 502, cors);
-    }
-    throw gateError;
-  }
 }
 
 interface ExistingResponses {
@@ -218,7 +190,7 @@ export async function POST(request: NextRequest, props: RouteParams) {
       return errorResponse(missingFieldError, 400, cors);
     }
 
-    const gateFailure = await checkTicketGate(doc, respondentDid, cors);
+    const gateFailure = await enforceTicketGate(doc, respondentDid, cors);
     if (gateFailure) return gateFailure;
 
     const callerHeaders = forwardedIdentityHeaders(request);
@@ -226,13 +198,7 @@ export async function POST(request: NextRequest, props: RouteParams) {
     const supersessionFailure = checkSupersession(existing, supersedes, doc.settings.multipleResponses === true, cors);
     if (supersessionFailure) return supersessionFailure;
 
-    const payload: SurveyResponsePayload = {
-      provenance: 'respondent-signed',
-      docHash: computeDocHash(doc),
-      answers,
-      ticketId,
-      ...(supersedes ? { supersedes } : {}),
-    };
+    const payload = buildRespondentPayload({ doc, answers, ticketId, supersedes });
     const input = buildResponseAttestationInput({
       issuerDid: respondentDid,
       surveyOwnerDid: doc.ownerDid,

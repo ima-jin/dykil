@@ -10,6 +10,8 @@ import {
 } from '@/lib/kernel/media';
 import { errorResponse, jsonResponse } from '@/lib/http';
 import { isSurveyDoc, type SurveyDoc } from '@/lib/survey';
+import { GateTokenUnavailableError } from '@/lib/events-gate-token';
+import { defaultTicketGate, TicketGateError, TicketGateNotConfiguredError } from '@/lib/ticket-gate';
 
 const log = createLogger('dykil');
 
@@ -109,5 +111,31 @@ export async function listOwnSurveys(request: Request): Promise<NextResponse> {
     }
     log.error({ err: String(error) }, 'Failed to list surveys');
     return errorResponse('Failed to fetch surveys', 500);
+  }
+}
+
+/**
+ * Apply the ticket-holder gate when the survey is ticket-scoped. Returns the
+ * error response to send, or null to continue. The gate answers a boolean;
+ * this app never sees a ticket row.
+ */
+export async function enforceTicketGate(
+  doc: SurveyDoc,
+  respondentDid: string,
+  cors: Record<string, string>,
+): Promise<NextResponse | null> {
+  if (!doc.settings.eventId) return null;
+  try {
+    const hasAccess = await defaultTicketGate().hasAccess({ eventId: doc.settings.eventId, did: respondentDid });
+    return hasAccess ? null : errorResponse('A ticket for this event is required to respond', 403, cors);
+  } catch (gateError) {
+    if (gateError instanceof TicketGateNotConfiguredError) {
+      return errorResponse(gateError.message, 501, cors);
+    }
+    if (gateError instanceof TicketGateError || gateError instanceof GateTokenUnavailableError) {
+      log.error({ err: gateError.message }, 'Ticket gate unavailable');
+      return errorResponse('The ticket gate is unavailable', 502, cors);
+    }
+    throw gateError;
   }
 }
