@@ -49,7 +49,7 @@ Missing any of these and `scripts/check-env.mjs` fails the deploy before anythin
 | `MEDIA_SERVICE_URL` | runtime | `https://dev-jin.imajin.ai/media` | `https://jin.imajin.ai/media` | Kernel media service base URL, including the /media prefix. Survey definitions are signed documents (media assets) stored here. |
 | `IMAJIN_KERNEL_URL` | runtime | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | Kernel base URL (no path). Used by loadAppSigningKey() to redeem the claim code and to fetch this app's signing key at boot. |
 | `NEXT_PUBLIC_IMAJIN_AUTH_URL` | build | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | Kernel origin (no path) the "Sign in with Imajin" link points at (`<value>/auth`). Baked into the client bundle at BUILD time; rebuild after changing. |
-| `NEXT_PUBLIC_APP_URL` | runtime | `https://dev-jin.imajin.ai/dykil` | `https://jin.imajin.ai/dykil` | This app's public URL. Its HOST is the `aud` used to verify scoped app tokens — it must match a host in this app's registered tokenAudiences (operator-confirmed at registration, docs/REGISTRATION.md). |
+| `NEXT_PUBLIC_APP_URL` | runtime | `https://dev-jin.imajin.ai/dykil` | `https://jin.imajin.ai/dykil` | This app's public URL. Not the token audience — path-routed apps share one host (imajin-ai#2706); the audience is this app's registry slug (see `IMAJIN_APP_AUD`). |
 | `IMAJIN_APP_DID` | runtime | `did:imajin:<dev app DID>` | `did:imajin:<prod app DID>` | This app's own did:imajin:… from registration (docs/REGISTRATION.md); dev and prod each have their own. Required on every boot once a keystore exists. Not a secret. |
 
 ## First boot only
@@ -117,6 +117,9 @@ Leave unset. Listed so the contract covers every variable the installed packages
 | `NODE_DID` | runtime | (unset) | (unset) | @ima-jin/auth node-act-as check (kernel node DID). Not used by dykil; leave unset. |
 | `APP_URL` | runtime | (unset) | (unset) | @ima-jin/auth fallback origin for redirects. dykil does not rely on it; leave unset. |
 | `NEXT_PUBLIC_BASE_URL` | runtime | (unset) | (unset) | @ima-jin/auth fallback origin for redirects (after APP_URL). dykil does not rely on it; leave unset. |
+| `IMAJIN_APP_AUD` | runtime | (unset) | (unset) | Override for the `aud` scoped app tokens are verified against (read by @ima-jin/auth). Defaults to this app's registry slug (`dykil`), which apps.provision writes into tokenAudiences — no post-provision edit. Never a host: path-routed apps share one (imajin-ai#2706). Leave unset. |
+| `REGISTRY_SERVICE_URL` | runtime | (unset) | (unset) | @ima-jin/config registry service URL resolution. Not used by dykil; leave unset. |
+| `REGISTRY_URL` | runtime | (unset) | (unset) | Deprecated alias of REGISTRY_SERVICE_URL read by @ima-jin/config. Not used by dykil; leave unset. |
 
 ## In the app template, read by nothing here
 
