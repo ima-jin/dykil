@@ -1,5 +1,5 @@
 import { requireSessionOrAppToken } from '@ima-jin/auth';
-import { thisAppHost } from '@/lib/env';
+import { APP_SLUG } from '@/lib/env';
 
 /**
  * This app's entire inbound-auth surface, deliberately funneled through one
@@ -13,7 +13,8 @@ import { thisAppHost } from '@/lib/env';
  *
  * Current implementation: `requireSessionOrAppToken` (`@ima-jin/auth`,
  * npmjs.org) — mirrors coffee's #1974 reference adoption of the #1069
- * Phase 1 scoped app-token, scoped to `aud = thisAppHost()`, with the
+ * Phase 1 scoped app-token, scoped to `aud = 'dykil'` (the registry slug, never
+ * the shared host — imajin-ai#2706; `IMAJIN_APP_AUD` overrides), with the
  * shared kernel session cookie as a transitional fallback.
  *
  * Candidate alternative implementation (not wired up, kept here as a
@@ -43,7 +44,7 @@ export interface AuthenticateOptions {
 
 export async function authenticate(request: Request, options?: AuthenticateOptions): Promise<AuthenticateResult> {
   const result = await requireSessionOrAppToken(request, {
-    aud: thisAppHost(),
+    slug: APP_SLUG,
     requireScopes: options?.requireScopes,
   });
   if ('error' in result) {
