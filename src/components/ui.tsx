@@ -14,9 +14,9 @@ export const MUTED = 'text-gray-600 dark:text-gray-400';
 
 export function Spinner({ label = 'Loading' }: Readonly<{ label?: string }>) {
   return (
-    <div className="flex justify-center py-12" role="status" aria-label={label}>
-      <div className="h-12 w-12 animate-spin rounded-full border-t-2 border-orange-500" />
-    </div>
+    <output className="flex justify-center py-12" aria-label={label}>
+      <span className="block h-12 w-12 animate-spin rounded-full border-t-2 border-orange-500" />
+    </output>
   );
 }
 

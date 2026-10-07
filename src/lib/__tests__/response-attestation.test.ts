@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalAttestationPayload } from '../kernel/attestations';
+import { computeDocHash, type SurveyDoc } from '../survey';
 import {
+  buildRespondentPayload,
   buildResponseAttestationInput,
   canonicalResponsePayload,
   surveyResponseAttestationType,
@@ -141,5 +143,33 @@ describe('buildResponseAttestationInput', () => {
     });
     expect(input.type).toBe('dykil/survey-response-legacy-import');
     expect(input.payload.legacyRowRef).toBe('dykil.survey_responses/survey_1/response_1');
+  });
+});
+
+describe('buildRespondentPayload', () => {
+  const doc: SurveyDoc = {
+    schema: 'dykil.survey/v1',
+    ownerDid: 'did:imajin:owner',
+    title: 'T',
+    description: null,
+    fields: { elements: [] },
+    settings: {},
+    type: 'survey',
+    status: 'published',
+    createdAt: 'c',
+    updatedAt: 'u',
+  };
+
+  it.each([
+    ['a first response', { ticketId: null, supersedes: null }, { ticketId: null }],
+    ['a ticketed response', { ticketId: 't1', supersedes: null }, { ticketId: 't1' }],
+    ['an edit, with supersedes inside the signed payload', { ticketId: null, supersedes: 'r0' }, { ticketId: null, supersedes: 'r0' }],
+  ])('builds %s', (_label, input, expected) => {
+    const payload = buildRespondentPayload({ doc, answers: { q: 1 }, ...input });
+    expect(payload).toEqual({ provenance: 'respondent-signed', docHash: computeDocHash(doc), answers: { q: 1 }, ...expected });
+  });
+
+  it('omits supersedes entirely (not null) for a first response, so ordinary signed bytes never change', () => {
+    expect('supersedes' in buildRespondentPayload({ doc, answers: {}, ticketId: null, supersedes: null })).toBe(false);
   });
 });

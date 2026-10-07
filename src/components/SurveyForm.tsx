@@ -21,10 +21,6 @@ function buildModel(json: SurveyJson, initialAnswers: Record<string, unknown> | 
   return model;
 }
 
-function noop(): void {
-  // preview mode never completes
-}
-
 /**
  * SurveyJS renders the questions; this app owns everything around them. The
  * model is built once per survey definition (pre-filled answers are an
@@ -35,7 +31,7 @@ export function SurveyForm({
   json,
   initialAnswers = null,
   preview = false,
-  onComplete = noop,
+  onComplete,
 }: Readonly<{
   json: SurveyJson;
   initialAnswers?: Record<string, unknown> | null;
@@ -49,7 +45,7 @@ export function SurveyForm({
   const model = useMemo(() => buildModel(json, initialAnswers, preview), [json]);
 
   useEffect(() => {
-    const handler = (sender: Model) => onCompleteRef.current(structuredClone(sender.data));
+    const handler = (sender: Model) => onCompleteRef.current?.(structuredClone(sender.data));
     model.onComplete.add(handler);
     return () => model.onComplete.remove(handler);
   }, [model]);

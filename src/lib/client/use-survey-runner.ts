@@ -1,46 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { loadInitialView } from '@/lib/client/runner-load';
-import { prepareResponse, submitResponse, type SurveyView } from '@/lib/client/survey-api';
+import { loadInitialView, type InitialView } from '@/lib/client/runner-load';
+import { answeringView, prepareStep, signStep, type RunnerView } from '@/lib/client/runner-steps';
 import { useSession } from '@/lib/client/use-session';
+
+export type { RunnerView } from '@/lib/client/runner-steps';
 
 type Answers = Record<string, unknown>;
 
-export interface SubmittedView {
-  kind: 'submitted';
-  survey: SurveyView;
-  answers: Answers;
-  responseId: string | null;
-}
-
-export type RunnerView =
-  | { kind: 'loading' }
-  | { kind: 'not-found' }
-  | { kind: 'unavailable'; status: string }
-  | { kind: 'error'; message: string }
-  | { kind: 'sign-in'; survey: SurveyView }
-  | { kind: 'ticket-required'; survey: SurveyView }
-  | {
-      kind: 'answering';
-      survey: SurveyView;
-      initialAnswers: Answers | null;
-      error: string | null;
-      preparing: boolean;
-      /** Set while editing an earlier response, so Cancel can go back to it. */
-      editing: SubmittedView | null;
-    }
-  | { kind: 'signing'; survey: SurveyView; answers: Answers; canonical: string; issuedAt: number; error: string | null; submitting: boolean }
-  | SubmittedView;
-
-type AnsweringView = Extract<RunnerView, { kind: 'answering' }>;
-type SigningView = Extract<RunnerView, { kind: 'signing' }>;
-
-function answeringView(survey: SurveyView, overrides: Partial<AnsweringView> = {}): AnsweringView {
-  return { kind: 'answering', survey, initialAnswers: null, error: null, preparing: false, editing: null, ...overrides };
-}
-
-function fromInitial(initial: Awaited<ReturnType<typeof loadInitialView>>): RunnerView {
+function fromInitial(initial: InitialView): RunnerView {
   return initial.kind === 'answering' ? answeringView(initial.survey) : initial;
 }
 
@@ -62,9 +31,10 @@ export function useSurveyRunner(params: {
   const onCompleted = useRef(params.onCompleted);
   onCompleted.current = params.onCompleted;
   const signedIn = session.status === 'signed-in';
+  const sessionKnown = session.status !== 'loading';
 
   useEffect(() => {
-    if (session.status === 'loading') return undefined;
+    if (!sessionKnown) return undefined;
     let cancelled = false;
     loadInitialView(surveyId, ticketId, signedIn).then((initial) => {
       if (cancelled) return;
@@ -74,49 +44,35 @@ export function useSurveyRunner(params: {
     return () => {
       cancelled = true;
     };
-  }, [surveyId, ticketId, signedIn, session.status]);
+  }, [surveyId, ticketId, signedIn, sessionKnown]);
+
+  const context = useCallback(() => ({ surveyId, ticketId, supersedes: supersedes.current }), [surveyId, ticketId]);
 
   const submitAnswers = useCallback(
     async (answers: Answers) => {
       if (view.kind !== 'answering') return;
       setView({ ...view, preparing: true, error: null });
-      const prepared = await prepareResponse(surveyId, { answers, ticketId, supersedes: supersedes.current });
-      if (!prepared.ok) {
-        setView({ ...view, initialAnswers: answers, preparing: false, error: prepared.error });
-        return;
-      }
-      const { canonical, issuedAt } = prepared.data;
-      setView({ kind: 'signing', survey: view.survey, answers, canonical, issuedAt, error: null, submitting: false });
+      setView(await prepareStep(context(), view, answers));
     },
-    [view, surveyId, ticketId],
+    [view, context],
   );
 
   const submitSignature = useCallback(
     async (signature: string) => {
       if (view.kind !== 'signing') return;
-      const signing: SigningView = view;
-      setView({ ...signing, submitting: true, error: null });
-      const result = await submitResponse(surveyId, {
-        answers: signing.answers,
-        ticketId,
-        supersedes: supersedes.current,
-        issuedAt: signing.issuedAt,
-        signature,
-      });
-      if (!result.ok) {
-        setView({ ...signing, submitting: false, error: result.error });
-        return;
+      setView({ ...view, submitting: true, error: null });
+      const next = await signStep(context(), view, signature);
+      if (next.kind === 'submitted') {
+        supersedes.current = null;
+        onCompleted.current?.(next.answers);
       }
-      supersedes.current = null;
-      setView({ kind: 'submitted', survey: signing.survey, answers: signing.answers, responseId: result.data.response?.id ?? null });
-      onCompleted.current?.(signing.answers);
+      setView(next);
     },
-    [view, surveyId, ticketId],
+    [view, context],
   );
 
   const backToAnswers = useCallback(() => {
-    if (view.kind !== 'signing') return;
-    setView(answeringView(view.survey, { initialAnswers: view.answers }));
+    if (view.kind === 'signing') setView(answeringView(view.survey, { initialAnswers: view.answers }));
   }, [view]);
 
   const startEdit = useCallback(() => {
