@@ -1,24 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import { SignInPrompt } from '@/components/SignInPrompt';
 import { EmptyState, MUTED, PageMessage, Spinner } from '@/components/ui';
 import { loadHandleSurveys, type HandleSurveysResult } from '@/lib/client/handle-api';
+import { useAsyncResult } from '@/lib/client/use-async-result';
+
+const FAILED: HandleSurveysResult = { kind: 'error', message: 'Something went wrong — try again' };
 
 /** A handle's public profile listing: every published survey they own. */
 export function HandleSurveys({ handle }: Readonly<{ handle: string }>) {
-  const [result, setResult] = useState<HandleSurveysResult | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    loadHandleSurveys(handle).then((next) => {
-      if (!cancelled) setResult(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [handle]);
+  const { result } = useAsyncResult(() => loadHandleSurveys(handle), FAILED, handle);
 
   if (!result) return <Spinner />;
   if (result.kind === 'signed-out') return <SignInPrompt title={`Sign in to see @${handle}'s surveys`} />;

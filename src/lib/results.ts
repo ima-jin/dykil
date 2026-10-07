@@ -106,9 +106,14 @@ function csvCell(value: string): string {
   return `"${safe.replaceAll('"', '""')}"`;
 }
 
+/** A question's CSV column header: its export label when it has one, else its title. */
+function columnLabel(field: SurveyJSElement): string {
+  return typeof field.exportLabel === 'string' && field.exportLabel ? field.exportLabel : field.title;
+}
+
 /** The owner's CSV export: one row per response, one column per question. */
 export function buildCsv(elements: readonly SurveyJSElement[], rows: readonly ResponseRow[]): string {
-  const header = ['Response ID', 'Submitted At', ...elements.map((field) => String(field.exportLabel ?? field.title))];
+  const header = ['Response ID', 'Submitted At', ...elements.map(columnLabel)];
   const body = rows.map((row) => [
     row.id,
     row.issuedAt,

@@ -36,11 +36,15 @@ export function useSurveyRunner(params: {
   useEffect(() => {
     if (!sessionKnown) return undefined;
     let cancelled = false;
-    loadInitialView(surveyId, ticketId, signedIn).then((initial) => {
-      if (cancelled) return;
-      if (initial.kind === 'submitted') onCompleted.current?.(initial.answers);
-      setView(fromInitial(initial));
-    });
+    loadInitialView(surveyId, ticketId, signedIn)
+      .then((initial) => {
+        if (cancelled) return;
+        if (initial.kind === 'submitted') onCompleted.current?.(initial.answers);
+        setView(fromInitial(initial));
+      })
+      .catch(() => {
+        if (!cancelled) setView({ kind: 'error', message: 'Something went wrong — try again' });
+      });
     return () => {
       cancelled = true;
     };

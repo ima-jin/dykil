@@ -16,11 +16,13 @@ export function useSession(): SessionState {
 
   useEffect(() => {
     let cancelled = false;
+    const apply = (next: SessionState) => {
+      if (!cancelled) setSession(next);
+    };
     apiFetch('/api/session')
-      .then(toSessionState, (): SessionState => ({ status: 'signed-out' }))
-      .then((next) => {
-        if (!cancelled) setSession(next);
-      });
+      .then(toSessionState)
+      .then(apply)
+      .catch(() => apply({ status: 'signed-out' }));
     return () => {
       cancelled = true;
     };

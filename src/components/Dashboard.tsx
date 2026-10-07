@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '@ima-jin/ui';
 import { BUTTON_DANGER, BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, EmptyState, MUTED, PageMessage, Spinner } from '@/components/ui';
 import { SignInPrompt } from '@/components/SignInPrompt';
+import { useAsyncResult } from '@/lib/client/use-async-result';
 import { deleteSurvey, loadDashboard, surveyShareUrl, type DashboardResult, type DashboardSurvey } from '@/lib/client/dashboard-api';
+
+const FAILED: DashboardResult = { kind: 'error', message: 'Something went wrong — try again' };
 
 const STATUS_BADGE: Record<string, string> = {
   published: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
@@ -13,9 +15,8 @@ const STATUS_BADGE: Record<string, string> = {
   closed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
 };
 
-function pluralResponses(count: number | null): string {
-  const n = count ?? 0;
-  return `${n} response${n === 1 ? '' : 's'}`;
+function pluralResponses(count: number): string {
+  return `${count} response${count === 1 ? '' : 's'}`;
 }
 
 function SurveyRow({
@@ -35,7 +36,7 @@ function SurveyRow({
           </div>
           {survey.description && <p className={`mb-3 line-clamp-2 ${MUTED}`}>{survey.description}</p>}
           <div className="flex items-center gap-4 text-sm text-gray-500">
-            <span>{pluralResponses(survey.responseCount)}</span>
+            <span>{pluralResponses(survey.responseCount ?? 0)}</span>
             <span aria-hidden="true">•</span>
             <span>Created {new Date(survey.createdAt).toLocaleDateString()}</span>
           </div>
@@ -88,12 +89,7 @@ function SurveyList({
 /** The owner's surveys with response counts — the screen after sign-in. */
 export function Dashboard() {
   const { toast } = useToast();
-  const [result, setResult] = useState<DashboardResult | null>(null);
-
-  const refresh = useCallback(async () => setResult(await loadDashboard()), []);
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const { result, reload } = useAsyncResult(loadDashboard, FAILED, 'dashboard');
 
   const copyLink = async (id: string) => {
     await navigator.clipboard.writeText(surveyShareUrl(globalThis.location.origin, id));
@@ -104,7 +100,7 @@ export function Dashboard() {
     if (!globalThis.confirm('Are you sure you want to delete this survey? This action cannot be undone.')) return;
     const outcome = await deleteSurvey(id);
     if (outcome.ok) {
-      await refresh();
+      await reload();
     } else {
       toast.error(outcome.error);
     }

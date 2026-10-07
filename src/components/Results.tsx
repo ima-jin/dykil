@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, EmptyState, MUTED, PageMessage, Spinner } from '@/components/ui';
 import { SignInPrompt } from '@/components/SignInPrompt';
 import { downloadTextFile } from '@/lib/client/download';
 import { loadResults, type ResultsData } from '@/lib/client/results-api';
+import { useAsyncResult } from '@/lib/client/use-async-result';
 import {
   aggregateResponses,
   answersOf,
@@ -18,6 +18,7 @@ import {
 } from '@/lib/results';
 import type { SurveyJSElement } from '@/lib/survey';
 
+const FAILED: ResultsData = { kind: 'error', message: 'Something went wrong — try again' };
 const BAR_TYPES = new Set(['radiogroup', 'dropdown', 'checkbox', 'boolean', 'rating']);
 const LEGACY_PROVENANCE = 'node-witnessed-legacy-import';
 
@@ -56,7 +57,7 @@ function FieldBody({ aggregate }: Readonly<{ aggregate: FieldAggregate }>) {
         <div className="mb-4 rounded-lg bg-orange-50 p-4 dark:bg-orange-900/20">
           <div className={`mb-1 text-sm ${MUTED}`}>Average Rating</div>
           <div className="text-3xl font-bold text-orange-500">
-            {(aggregate.average ?? 0).toFixed(2)} / {String(field.rateMax ?? 5)}
+            {(aggregate.average ?? 0).toFixed(2)} / {Number(field.rateMax ?? 5)}
           </div>
         </div>
         <Bars aggregate={aggregate} />
@@ -184,17 +185,7 @@ function ResultsMessage({ data }: Readonly<{ data: Exclude<ResultsData, { kind: 
 
 /** A survey's results for its owner: per-question aggregates, every response, and a CSV export. */
 export function Results({ surveyId }: Readonly<{ surveyId: string }>) {
-  const [data, setData] = useState<ResultsData | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    loadResults(surveyId).then((next) => {
-      if (!cancelled) setData(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [surveyId]);
+  const { result: data } = useAsyncResult(() => loadResults(surveyId), FAILED, surveyId);
 
   if (!data) return <Spinner />;
   if (data.kind === 'ok') return <ResultsBody data={data} />;

@@ -57,7 +57,7 @@ describe('/embed/[surveyId]', () => {
     expect(messages(post)[0]).toEqual([{ type: 'survey-height', height: 0 }, 'https://events.example']);
     const before = post.mock.calls.length;
     observers[0].callback();
-    expect(post.mock.calls.length).toBe(before + 1);
+    expect(post.mock.calls).toHaveLength(before + 1);
   });
 
   it('stops observing when it is removed', async () => {

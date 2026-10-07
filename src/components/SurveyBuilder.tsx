@@ -22,15 +22,17 @@ export function SurveyBuilder() {
 
   useEffect(() => {
     if (!editId) return;
-    loadDraft(editId).then((result) => {
-      if (result.ok) {
-        setDraft(result.data);
-      } else {
-        toast.error('Failed to load survey');
-        router.push('/dashboard');
-      }
-      setLoading(false);
-    });
+    const giveUp = () => {
+      toast.error('Failed to load survey');
+      router.push('/dashboard');
+    };
+    loadDraft(editId)
+      .then((result) => {
+        if (result.ok) setDraft(result.data);
+        else giveUp();
+      })
+      .catch(giveUp)
+      .finally(() => setLoading(false));
     // `toast` / `router` are stable app-wide singletons; only a different survey should reload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);

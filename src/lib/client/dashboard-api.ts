@@ -57,5 +57,6 @@ export async function deleteSurvey(id: string): Promise<ApiResult<null>> {
 
 /** The shareable respondent link: `<origin>/dykil/survey/<id>`. */
 export function surveyShareUrl(origin: string, id: string): string {
-  return `${origin}${withBasePath(`/survey/${encodeURIComponent(id)}`)}`;
+  const path = withBasePath(`/survey/${encodeURIComponent(id)}`);
+  return `${origin}${path}`;
 }
