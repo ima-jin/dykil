@@ -133,22 +133,38 @@ const SURVEY_LIST_PAGE_SIZE = 200;
 const SURVEY_LIST_MAX_PAGES = 25;
 
 /**
- * List the caller's own survey documents:
+ * List survey documents:
  * `GET /media/api/assets?context_app=dykil&context_feature=survey` — an exact
  * match on the upload context each survey asset was stored under (the
  * `media:read` app-token path plus the context filters, imajin-ai#2648), so
  * no filename convention is involved. Pages by `offset` until a short page.
+ *
+ * Without `ownerDid` this is the caller's own surveys (any access level).
+ * With `ownerDid` it is that identity's surveys and the kernel restricts the
+ * result to assets whose `.fair` manifest access is `public` — i.e. their
+ * published surveys — so a draft is never listed to anyone else.
  */
-export async function listMySurveyAssets(request: Request): Promise<KernelAsset[]> {
+async function listSurveyAssets(request: Request, ownerDid?: string): Promise<KernelAsset[]> {
   return collectPages<KernelAsset, number>(async (start = 0) => {
     const url = new URL(`${mediaServiceUrl()}/api/assets`);
     url.searchParams.set('context_app', DYKIL_MEDIA_CONTEXT_APP);
     url.searchParams.set('context_feature', DYKIL_MEDIA_CONTEXT_FEATURE);
     url.searchParams.set('limit', String(SURVEY_LIST_PAGE_SIZE));
     url.searchParams.set('offset', String(start));
+    if (ownerDid) url.searchParams.set('did', ownerDid);
     const response = await fetch(url, { headers: forwardedIdentityHeaders(request), cache: 'no-store' });
     const body = (await parseJsonOrThrow(response)) as { assets: KernelAsset[] };
     const full = body.assets.length >= SURVEY_LIST_PAGE_SIZE;
     return { items: body.assets, next: full ? start + SURVEY_LIST_PAGE_SIZE : undefined };
   }, SURVEY_LIST_MAX_PAGES);
+}
+
+/** The caller's own survey documents. */
+export function listMySurveyAssets(request: Request): Promise<KernelAsset[]> {
+  return listSurveyAssets(request);
+}
+
+/** Another identity's published (`public`) survey documents. */
+export function listPublicSurveyAssets(ownerDid: string, request: Request): Promise<KernelAsset[]> {
+  return listSurveyAssets(request, ownerDid);
 }

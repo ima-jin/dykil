@@ -22,6 +22,18 @@ export function mediaServiceUrl(): string {
 }
 
 /**
+ * Base URL of the kernel's profile service (`<IMAJIN_KERNEL_URL>/profile`) —
+ * the public `GET /api/profile/{handle}` resolves a handle to its DID. Derived
+ * from the kernel origin this app already requires (so no new env var), unless
+ * `PROFILE_SERVICE_URL` overrides it.
+ */
+export function profileServiceUrl(): string {
+  if (process.env.PROFILE_SERVICE_URL) return process.env.PROFILE_SERVICE_URL;
+  const origin = required('IMAJIN_KERNEL_URL');
+  return `${origin.endsWith('/') ? origin.slice(0, -1) : origin}/profile`;
+}
+
+/**
  * This app's own registered DID (see docs/REGISTRATION.md). Only required
  * once a bootstrap keystore already exists (`loadAppSigningKey()`'s first
  * boot returns it directly) — see `src/lib/auth/signing-identity.ts`.

@@ -2,24 +2,35 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // tsconfig keeps `jsx: preserve` for Next; vitest must transform JSX itself.
+  esbuild: { jsx: 'automatic' },
   resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    alias: [
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
       // See src/test/next-server-shim.ts for why this exists: Next's real
       // `next/server` pulls in a CJS-only dependency that breaks under
       // vitest's SSR module loading. Applies to both this app's own code and
       // (via `server.deps.inline` below) the published `@ima-jin/*` packages,
       // which also import `NextResponse` from `next/server`.
-      'next/server': fileURLToPath(new URL('./src/test/next-server-shim.ts', import.meta.url)),
+      { find: 'next/server', replacement: fileURLToPath(new URL('./src/test/next-server-shim.ts', import.meta.url)) },
       // See src/test/next-headers-shim.ts — same rationale, for
       // `@ima-jin/auth-client`'s single-entrypoint import of `next/headers`'
       // request-scoped `cookies()`.
-      'next/headers': fileURLToPath(new URL('./src/test/next-headers-shim.ts', import.meta.url)),
-    },
+      { find: 'next/headers', replacement: fileURLToPath(new URL('./src/test/next-headers-shim.ts', import.meta.url)) },
+      // pino/thread-stream `require('buffer')` / `require('assert')`. A UI dependency
+      // pulls the userland `buffer@6` / `assert` packages into the pnpm store, and the
+      // SSR dependency optimizer would resolve those names to them instead of to
+      // Node's builtins (userland `buffer` has no `constants`, so thread-stream
+      // crashes on import). Pin them to the builtins.
+      { find: /^(buffer|assert)$/, replacement: 'node:$1' },
+    ],
   },
   test: {
     environment: 'node',
-    include: ['**/__tests__/**/*.test.ts'],
+    include: ['**/__tests__/**/*.test.{ts,tsx}'],
+    // Component/page tests opt into jsdom with a `@vitest-environment jsdom` docblock;
+    // everything else (routes, libs) stays on the node environment.
+    setupFiles: ['./src/test/setup.ts'],
     exclude: ['node_modules/**', '.next/**'],
     server: {
       // Force these through Vite's own resolution pipeline instead of
@@ -59,6 +70,8 @@ export default defineConfig({
       exclude: [
         '**/__tests__/**',
         '**/*.test.ts',
+        '**/*.test.tsx',
+        'src/test/**',
         '**/*.d.ts',
         '**/.next/**',
         '**/node_modules/**',
