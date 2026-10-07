@@ -28,7 +28,7 @@ export const BASE_PATH = '/dykil';
  *   first-boot       only for the advanced/CI claim path, then removed
  *   optional         read, has a safe default (or a documented degraded mode) when unset
  *   forbidden        must NOT be set (the app refuses to boot if it is)
- *   runtime-set      injected by Next.js / pm2 / next.config.js — not set in the env file
+ *   runtime-set      injected by Next.js / pm2 / next.config.mjs — not set in the env file
  *   dependency       read by an @ima-jin/* dependency on a code path dykil
  *                    does not exercise; leave unset
  *   template-unused  present in the app template's .env.example but not read
