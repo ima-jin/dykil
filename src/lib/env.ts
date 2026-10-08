@@ -50,16 +50,14 @@ export function legacyImportAttestationType(): string {
   return process.env.DYKIL_LEGACY_IMPORT_ATTESTATION_TYPE ?? 'dykil/survey-response-legacy-import';
 }
 
-/** This app's own host, used as the `aud` for scoped app-token verification. */
-export function thisAppHost(): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL;
-  if (!base) return 'dykil.imajin.ai';
-  try {
-    return new URL(base).host;
-  } catch {
-    return 'dykil.imajin.ai';
-  }
-}
+/**
+ * This app's registry slug — the `aud` its scoped app tokens are minted for
+ * (`registry.apps.token_audiences` holds slugs, which `apps.provision` writes).
+ * NEVER derive the audience from this app's host: every path-routed app shares
+ * `jin.imajin.ai` / `dev-jin.imajin.ai` (imajin-ai#2706). `@ima-jin/auth` also
+ * honours an `IMAJIN_APP_AUD` override.
+ */
+export const APP_SLUG = 'dykil';
 
 /**
  * Base URL of the events service, e.g. https://dev-jin.imajin.ai/events. Optional:

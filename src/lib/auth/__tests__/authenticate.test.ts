@@ -12,15 +12,27 @@ describe('authenticate', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://dykil.imajin.ai';
   });
 
-  it("scopes the audience to this app's own host, mirroring coffee's #1974 adoption", async () => {
+  it("scopes the audience to this app's registry slug, never its host (imajin-ai#2706)", async () => {
     requireSessionOrAppTokenMock.mockResolvedValue({ auth: { did: 'did:imajin:respondent', scopes: [], via: 'token' } });
     const { authenticate } = await import('../authenticate');
 
     const request = new Request('https://dykil.imajin.ai/api/surveys');
     const result = await authenticate(request);
 
-    expect(requireSessionOrAppTokenMock).toHaveBeenCalledWith(request, { aud: 'dykil.imajin.ai', requireScopes: undefined });
+    expect(requireSessionOrAppTokenMock).toHaveBeenCalledWith(request, { slug: 'dykil', requireScopes: undefined });
     expect('auth' in result && result.auth.did).toBe('did:imajin:respondent');
+  });
+
+  it('never derives the audience from the app URL host', async () => {
+    process.env.NEXT_PUBLIC_APP_URL = 'https://dev-jin.imajin.ai/dykil';
+    requireSessionOrAppTokenMock.mockResolvedValue({ error: 'x', status: 401 });
+    const { authenticate } = await import('../authenticate');
+
+    await authenticate(new Request('https://dev-jin.imajin.ai/dykil/api/surveys'));
+
+    const options = requireSessionOrAppTokenMock.mock.calls[0][1] as Record<string, unknown>;
+    expect(options.slug).toBe('dykil');
+    expect(options).not.toHaveProperty('aud');
   });
 
   it('forwards a failure as { error, status }', async () => {
@@ -39,7 +51,7 @@ describe('authenticate', () => {
     await authenticate(new Request('https://dykil.imajin.ai/api/surveys'), { requireScopes: ['survey:write'] });
 
     expect(requireSessionOrAppTokenMock).toHaveBeenCalledWith(expect.anything(), {
-      aud: 'dykil.imajin.ai',
+      slug: 'dykil',
       requireScopes: ['survey:write'],
     });
   });

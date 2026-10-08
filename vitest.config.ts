@@ -12,6 +12,9 @@ export default defineConfig({
       // vitest's SSR module loading. Applies to both this app's own code and
       // (via `server.deps.inline` below) the published `@ima-jin/*` packages,
       // which also import `NextResponse` from `next/server`.
+      // @ima-jin/config >=0.8.15 imports the explicit `next/server.js` specifier; a string alias
+      // only matches the bare `next/server` key (or `next/server/…`), so it needs its own entry.
+      { find: 'next/server.js', replacement: fileURLToPath(new URL('./src/test/next-server-shim.ts', import.meta.url)) },
       { find: 'next/server', replacement: fileURLToPath(new URL('./src/test/next-server-shim.ts', import.meta.url)) },
       // See src/test/next-headers-shim.ts — same rationale, for
       // `@ima-jin/auth-client`'s single-entrypoint import of `next/headers`'

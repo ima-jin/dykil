@@ -316,5 +316,29 @@
     "summary": "Listed in the app template; no code in this repo reads it. Safe to omit.",
     "dev": "host",
     "prod": "host"
+  },
+  {
+    "name": "IMAJIN_APP_AUD",
+    "status": "optional",
+    "phase": "runtime",
+    "summary": "Override for the `aud` scoped app tokens are verified against (read by @ima-jin/auth). Defaults to this app's registry slug (`dykil`), which apps.provision writes into tokenAudiences. Never a host: path-routed apps share one (imajin-ai#2706). Leave unset.",
+    "dev": "(unset)",
+    "prod": "(unset)"
+  },
+  {
+    "name": "REGISTRY_SERVICE_URL",
+    "status": "dependency",
+    "phase": "runtime",
+    "summary": "@ima-jin/config registry service URL resolution. Not used by dykil; leave unset.",
+    "dev": "(unset)",
+    "prod": "(unset)"
+  },
+  {
+    "name": "REGISTRY_URL",
+    "status": "dependency",
+    "phase": "runtime",
+    "summary": "Deprecated alias of REGISTRY_SERVICE_URL read by @ima-jin/config. Not used by dykil; leave unset.",
+    "dev": "(unset)",
+    "prod": "(unset)"
   }
 ]

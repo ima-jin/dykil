@@ -85,21 +85,10 @@ describe('src/lib/env', () => {
     expect(legacyImportAttestationType()).toBe('custom/legacy-type');
   });
 
-  it('thisAppHost defaults to dykil.imajin.ai when unset', async () => {
-    const { thisAppHost } = await import('@/lib/env');
-    expect(thisAppHost()).toBe('dykil.imajin.ai');
-  });
-
-  it('thisAppHost derives the host from a configured app URL', async () => {
-    process.env.NEXT_PUBLIC_APP_URL = 'https://dykil.imajin.ai:8443/base';
-    const { thisAppHost } = await import('@/lib/env');
-    expect(thisAppHost()).toBe('dykil.imajin.ai:8443');
-  });
-
-  it('thisAppHost falls back when the configured app URL is invalid', async () => {
-    process.env.NEXT_PUBLIC_APP_URL = 'not a url';
-    const { thisAppHost } = await import('@/lib/env');
-    expect(thisAppHost()).toBe('dykil.imajin.ai');
+  it('APP_SLUG is the registry slug, independent of NEXT_PUBLIC_APP_URL (imajin-ai#2706)', async () => {
+    process.env.NEXT_PUBLIC_APP_URL = 'https://dev-jin.imajin.ai/dykil';
+    const { APP_SLUG } = await import('@/lib/env');
+    expect(APP_SLUG).toBe('dykil');
   });
 
   it('eventsServiceUrl is undefined when unset or empty, and returns the configured value otherwise', async () => {
