@@ -29,6 +29,7 @@ import { canonicalResponsePayload } from '../src/lib/response-attestation';
 import { createAttestation, listAllAttestations } from '../src/lib/kernel/attestations';
 import { computeDocHash, normalizeSurveySettings, SURVEY_DOC_SCHEMA, surveyFilename, type SurveyDoc } from '../src/lib/survey';
 import { mediaServiceUrl } from '../src/lib/env';
+import { appServiceAuthHeaders, getAppServiceToken } from '../src/lib/app-service-token';
 
 interface LegacySurveyRow {
   id: string;
@@ -112,10 +113,13 @@ async function importSurveyDoc(row: LegacySurveyRow, commit: boolean): Promise<s
   form.set('context', JSON.stringify({ app: 'dykil', feature: 'survey', access: doc.status === 'published' ? 'public' : 'private' }));
 
   // The import script runs with this app's OWN service credentials, not a
-  // per-user session — see FINDINGS.md gap #2393 for why this write path is
-  // itself blocked against a real, host-scoped-cookie kernel deployment
-  // until the media routes accept a scoped app-token or service credential.
-  const response = await fetch(`${mediaServiceUrl()}/api/assets`, { method: 'POST', body: form });
+  // per-user session: the scoped app token minted with its own signing key
+  // (src/lib/app-service-token.ts), sent as a Bearer on the media write.
+  const response = await fetch(`${mediaServiceUrl()}/api/assets`, {
+    method: 'POST',
+    headers: await appServiceAuthHeaders(),
+    body: form,
+  });
   if (!response.ok) {
     throw new Error(`Failed to create signed doc for legacy survey ${row.id}: ${response.status}`);
   }
@@ -128,7 +132,10 @@ async function importSurveyDoc(row: LegacySurveyRow, commit: boolean): Promise<s
  * this script never double-imports the same legacy row.
  */
 async function fetchAlreadyImportedRefs(ownerDid: string): Promise<Set<string>> {
-  const existing = await listAllAttestations({ subjectDid: ownerDid, type: 'dykil/survey-response-legacy-import' });
+  const existing = await listAllAttestations(
+    { subjectDid: ownerDid, type: 'dykil/survey-response-legacy-import' },
+    await appServiceAuthHeaders(),
+  );
   const refs = new Set<string>();
   for (const attestation of existing) {
     const ref = attestation.payload?.legacyRowRef;
@@ -176,18 +183,22 @@ async function importResponseAttestation(params: {
 
   const signed = await sign(canonical, params.witnessPrivateKey, { id: params.witnessDid, type: 'agent' });
 
-  await createAttestation({
-    issuerDid: params.witnessDid,
-    subjectDid: params.surveyOwnerDid,
-    type: 'dykil/survey-response-legacy-import',
-    contextId: params.surveyAssetId,
-    contextType: 'dykil.survey',
-    payload,
-    signature: signed.signature,
-    issuedAt,
-    // The legacy ticket id rides as the indexed ref, same as a live response (imajin-ai#2534).
-    ref: params.row.ticket_id,
-  });
+  await createAttestation(
+    {
+      issuerDid: params.witnessDid,
+      subjectDid: params.surveyOwnerDid,
+      type: 'dykil/survey-response-legacy-import',
+      contextId: params.surveyAssetId,
+      contextType: 'dykil.survey',
+      payload,
+      signature: signed.signature,
+      issuedAt,
+      // The legacy ticket id rides as the indexed ref, same as a live response (imajin-ai#2534).
+      ref: params.row.ticket_id,
+    },
+    // This app's own scoped app token — the kernel's attestation route authenticates its caller.
+    await appServiceAuthHeaders(),
+  );
 
   return true;
 }
@@ -209,6 +220,9 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
     const signingKey = getSigningIdentity();
     witnessDid = signingKey.appDid;
     witnessPrivateKey = signingKey.privateKey;
+    // Mint the app's own token up front so an unclaimed app or a kernel refusal
+    // fails loudly here, before the first write, rather than mid-import.
+    await getAppServiceToken();
   }
 
   const client = new Client({ connectionString });

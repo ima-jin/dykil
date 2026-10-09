@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { clientMock, listAllAttestationsMock, createAttestationMock, signMock, bootstrapSigningIdentityMock, getSigningIdentityMock } = vi.hoisted(() => ({
+const {
+  clientMock,
+  listAllAttestationsMock,
+  createAttestationMock,
+  signMock,
+  bootstrapSigningIdentityMock,
+  getSigningIdentityMock,
+  getAppServiceTokenMock,
+} = vi.hoisted(() => ({
   clientMock: {
     connect: vi.fn(),
     end: vi.fn(),
@@ -11,6 +19,7 @@ const { clientMock, listAllAttestationsMock, createAttestationMock, signMock, bo
   signMock: vi.fn(),
   bootstrapSigningIdentityMock: vi.fn(),
   getSigningIdentityMock: vi.fn(),
+  getAppServiceTokenMock: vi.fn(),
 }));
 
 vi.mock('pg', () => ({ Client: vi.fn(() => clientMock) }));
@@ -22,6 +31,10 @@ vi.mock('../../src/lib/kernel/attestations', async () => {
   const actual = await vi.importActual<typeof import('../../src/lib/kernel/attestations')>('../../src/lib/kernel/attestations');
   return { ...actual, listAllAttestations: listAllAttestationsMock, createAttestation: createAttestationMock };
 });
+vi.mock('../../src/lib/app-service-token', () => ({
+  getAppServiceToken: getAppServiceTokenMock,
+  appServiceAuthHeaders: async () => ({ Authorization: `Bearer ${await getAppServiceTokenMock()}` }),
+}));
 vi.mock('../../src/lib/auth/signing-identity', () => ({
   bootstrapSigningIdentity: bootstrapSigningIdentityMock,
   getSigningIdentity: getSigningIdentityMock,
@@ -64,6 +77,7 @@ describe('scripts/import-legacy', () => {
     createAttestationMock.mockReset().mockResolvedValue({ id: 'att_new' });
     signMock.mockReset().mockResolvedValue({ signature: 'sig-hex' });
     bootstrapSigningIdentityMock.mockReset().mockResolvedValue(undefined);
+    getAppServiceTokenMock.mockReset().mockResolvedValue('app-token-1');
     getSigningIdentityMock.mockReset().mockReturnValue({
       appDid: 'did:imajin:dykil-app',
       privateKey: 'deadbeef',
@@ -91,6 +105,57 @@ describe('scripts/import-legacy', () => {
     expect(summary.attestationsCreated).toBe(0);
     expect(createAttestationMock).not.toHaveBeenCalled();
     expect(fetchWasCalledForAssetUpload()).toBe(false);
+    expect(getAppServiceTokenMock).not.toHaveBeenCalled();
+  });
+
+  it('dry-run needs no credentials: it never bootstraps the signing identity or mints a token', async () => {
+    getAppServiceTokenMock.mockRejectedValue(new Error('no credentials'));
+    bootstrapSigningIdentityMock.mockRejectedValue(new Error('no credentials'));
+    const { runImport } = await import('../import-legacy');
+    await expect(runImport([])).resolves.toMatchObject({ surveysRead: 1, responsesRead: 1 });
+    expect(bootstrapSigningIdentityMock).not.toHaveBeenCalled();
+  });
+
+  it('--commit fails loudly, before any write, when the app token cannot be minted (unclaimed app)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    getAppServiceTokenMock.mockRejectedValue(new Error('this app has not been claimed'));
+
+    const { runImport } = await import('../import-legacy');
+    await expect(runImport(['--commit'])).rejects.toThrow('has not been claimed');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createAttestationMock).not.toHaveBeenCalled();
+    expect(clientMock.connect).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("--commit sends the app's own token as Authorization on the media /api/assets POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { runImport } = await import('../import-legacy');
+    await runImport(['--commit']);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://dev-jin.imajin.ai/media/api/assets');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ Authorization: 'Bearer app-token-1' });
+
+    vi.unstubAllGlobals();
+  });
+
+  it("--commit sends the app's own token on the attestation write and the idempotency lookup", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) }));
+
+    const { runImport } = await import('../import-legacy');
+    await runImport(['--commit']);
+
+    expect(createAttestationMock).toHaveBeenCalledTimes(1);
+    expect(createAttestationMock.mock.calls[0][1]).toEqual({ Authorization: 'Bearer app-token-1' });
+    expect(listAllAttestationsMock.mock.calls[0][1]).toEqual({ Authorization: 'Bearer app-token-1' });
+
+    vi.unstubAllGlobals();
   });
 
   it('requires a fetchable signing key to --commit', async () => {
