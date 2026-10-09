@@ -122,10 +122,13 @@ what step 2 found.
    `requireAppAuth`; session-less service tokens carry no scopes today, so dykil mints its token through
    `POST /auth/api/apps/token` bound to an `app.authorized` attestation id
    (`DYKIL_EVENTS_AUTHORIZATION_ID`). Until an operator creates that, ticket-gated surveys answer 501.
-4. **`scripts/import-legacy.ts` is step 4's (#2522) to finish.** It was adapted to the new client API
-   (`ref`, cursor listing, no `allowAnonymous`) but still reads attestations and uploads documents with
-   no credentials, so against a real kernel its idempotency check sees nothing and its upload is
-   refused. It also doesn't yet record the legacy-id to asset-id map #2522 needs.
+4. **`scripts/import-legacy.ts` sends the app's own token, but the kernel won't accept it yet.** The script
+   mints dykil's own app-service token (`src/lib/app-service-token.ts`, `POST /auth/api/apps/token/service`,
+   proof of possession with the vault-held key) and sends it as `Authorization: Bearer` on the media asset POST,
+   the attestation POST and the idempotency lookup (dykil#16). The media routes and the attestation route only
+   verify a `session-app+jwt`, so `--commit` is refused until
+   [ima-jin/imajin-ai#2747](https://github.com/ima-jin/imajin-ai/issues/2747) lands. It also doesn't yet record
+   the legacy-id to asset-id map #2522 needs.
 5. **Respondent signing is still caller-side.** The respondent must produce the Ed25519 signature
    over `canonicalResponsePayload(...)` itself, including `supersedes` for an edit (#2394 gap, unchanged).
 6. **No UI yet.** *(Closed by #2719: every screen is ported, see docs/ARCHITECTURE.md "UI".)*

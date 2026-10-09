@@ -1,13 +1,9 @@
-import { randomUUID } from 'node:crypto';
-import { signBootstrapPayload } from '@ima-jin/auth-client';
-import { appDid, authServiceUrl, eventsGateAuthorizationId } from '@/lib/env';
-import { getSigningIdentity, isAppClaimed } from '@/lib/auth/signing-identity';
+import { eventsGateAuthorizationId } from '@/lib/env';
+import { isAppClaimed } from '@/lib/auth/signing-identity';
+import { EXPIRY_SKEW_MS, mintAppToken, type MintedAppToken } from '@/lib/app-token';
 
 /** The scope the events app's ticket-holder gate requires of its caller. */
 export const EVENTS_GATE_SCOPE = 'events:read';
-
-/** Refresh a cached token this long before the kernel says it expires. */
-const EXPIRY_SKEW_MS = 30_000;
 
 export class GateTokenUnavailableError extends Error {
   constructor(message: string) {
@@ -20,11 +16,6 @@ export interface GateTokenProvider {
   /** True once everything needed to mint a token is configured. */
   isConfigured(): boolean;
   getToken(): Promise<string>;
-}
-
-interface CachedToken {
-  token: string;
-  expiresAtMs: number;
 }
 
 /**
@@ -41,7 +32,7 @@ interface CachedToken {
  * it expires.
  */
 export class KernelGateTokenProvider implements GateTokenProvider {
-  private cached: CachedToken | null = null;
+  private cached: MintedAppToken | null = null;
 
   isConfigured(): boolean {
     return Boolean(eventsGateAuthorizationId()) && isAppClaimed();
@@ -56,27 +47,17 @@ export class KernelGateTokenProvider implements GateTokenProvider {
     return minted.token;
   }
 
-  private async mint(): Promise<CachedToken> {
+  private async mint(): Promise<MintedAppToken> {
     const attestationId = eventsGateAuthorizationId();
     if (!attestationId || !isAppClaimed()) {
       throw new GateTokenUnavailableError('The events gate token cannot be minted: app is unclaimed or DYKIL_EVENTS_AUTHORIZATION_ID is unset');
     }
-    const identity = getSigningIdentity();
-    const did = appDid() ?? identity.appDid;
-    const nonce = randomUUID().replaceAll('-', '');
-    const timestamp = new Date().toISOString();
-    const signature = signBootstrapPayload(`${did}:${attestationId}:${nonce}:${timestamp}`, identity.privateKey);
-
-    const response = await fetch(`${authServiceUrl()}/api/apps/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ appDid: did, attestationId, scope: EVENTS_GATE_SCOPE, nonce, timestamp, signature }),
-      cache: 'no-store',
+    return mintAppToken({
+      endpoint: 'apps/token',
+      attestationId,
+      scope: EVENTS_GATE_SCOPE,
+      label: 'events gate token',
+      fail: (message) => new GateTokenUnavailableError(message),
     });
-    const body = (await response.json().catch(() => null)) as { token?: string; expiresIn?: number; error?: string } | null;
-    if (!response.ok || !body?.token) {
-      throw new GateTokenUnavailableError(body?.error ?? `Kernel refused to mint the events gate token (${response.status})`);
-    }
-    return { token: body.token, expiresAtMs: Date.now() + (body.expiresIn ?? 0) * 1000 };
   }
 }
