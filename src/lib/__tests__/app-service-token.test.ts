@@ -1,16 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateBootstrapKeypair } from '@ima-jin/auth-client';
-
-const { isAppClaimedMock, getSigningIdentityMock } = vi.hoisted(() => ({
-  isAppClaimedMock: vi.fn(),
-  getSigningIdentityMock: vi.fn(),
-}));
-
-vi.mock('@/lib/auth/signing-identity', () => ({
-  isAppClaimed: isAppClaimedMock,
-  getSigningIdentity: getSigningIdentityMock,
-}));
-
+import { getSigningIdentity, isAppClaimed } from '@/lib/auth/signing-identity';
 import {
   appServiceAuthHeaders,
   AppServiceTokenUnavailableError,
@@ -18,28 +8,29 @@ import {
   resetAppServiceTokenForTests,
 } from '../app-service-token';
 
-const ENV_KEYS = ['AUTH_SERVICE_URL', 'IMAJIN_APP_DID'] as const;
-const originalEnv: Record<string, string | undefined> = {};
+vi.mock('@/lib/auth/signing-identity', () => ({ isAppClaimed: vi.fn(), getSigningIdentity: vi.fn() }));
+
+const claimed = vi.mocked(isAppClaimed);
+const identity = vi.mocked(getSigningIdentity);
+const savedEnv = { url: process.env.AUTH_SERVICE_URL, did: process.env.IMAJIN_APP_DID };
+
+function restoreEnv(name: 'AUTH_SERVICE_URL' | 'IMAJIN_APP_DID', value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 describe('app service token', () => {
   beforeEach(() => {
-    for (const key of ENV_KEYS) originalEnv[key] = process.env[key];
     process.env.AUTH_SERVICE_URL = 'https://dev-jin.imajin.ai/auth';
     delete process.env.IMAJIN_APP_DID;
     resetAppServiceTokenForTests();
-    isAppClaimedMock.mockReset().mockReturnValue(true);
-    getSigningIdentityMock.mockReset().mockReturnValue({
-      appDid: 'did:imajin:dykil-app',
-      privateKey: generateBootstrapKeypair().privateKey,
-      publicKey: null,
-    });
+    claimed.mockReturnValue(true);
+    identity.mockReturnValue({ appDid: 'did:imajin:dykil-app', privateKey: generateBootstrapKeypair().privateKey, publicKey: null });
   });
 
   afterEach(() => {
-    for (const key of ENV_KEYS) {
-      if (originalEnv[key] === undefined) delete process.env[key];
-      else process.env[key] = originalEnv[key];
-    }
+    restoreEnv('AUTH_SERVICE_URL', savedEnv.url);
+    restoreEnv('IMAJIN_APP_DID', savedEnv.did);
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -86,7 +77,7 @@ describe('app service token', () => {
   });
 
   it('refuses loudly, without calling the kernel, when the app is not claimed', async () => {
-    isAppClaimedMock.mockReturnValue(false);
+    claimed.mockReturnValue(false);
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
