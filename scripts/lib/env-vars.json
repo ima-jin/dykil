@@ -64,15 +64,6 @@
     "prod": "/home/jin/.imajin/dykil.prod.keystore.json"
   },
   {
-    "name": "IMAJIN_APP_CLAIM_CODE",
-    "status": "first-boot",
-    "phase": "runtime",
-    "secret": true,
-    "summary": "Advanced/CI fallback. The normal operator path is pasting the one-time code from the kernel operator's /jin approval card on `<app>/claim` (imajin-ai#2427) — no env var needed. If set, it is spent on first boot (no keystore yet) or a lost-keystore rebind; delete it afterwards.",
-    "dev": "(only for the CI claim path)",
-    "prod": "(only for the CI claim path)"
-  },
-  {
     "name": "DYKIL_APP_PRIVATE_KEY",
     "status": "forbidden",
     "phase": "runtime",

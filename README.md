@@ -1,4 +1,5 @@
 # dykil — surveys & polls on Imajin primitives
+Operator identity setup uses the app's `/dykil/claim` page.
 
 > Forked from [`ima-jin/imajin-app-template`](https://github.com/ima-jin/imajin-app-template). **Read
 > [`AGENTS.md`](./AGENTS.md) first** — it defines the boundary this app must not cross.
@@ -28,9 +29,9 @@ genuine respondent-signed ones in the data, and never upgraded.
    (refs [imajin-ai#2411](https://github.com/ima-jin/imajin-ai/issues/2411)).
 2. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_KERNEL_URL`, `IMAJIN_APP_DID`,
    `NEXT_PUBLIC_IMAJIN_APP_ID`, `AUTH_SERVICE_URL`, and `MEDIA_SERVICE_URL`. This app refuses to
-   start on a raw `DYKIL_APP_PRIVATE_KEY` still being set. **Skip `IMAJIN_APP_CLAIM_CODE` for
-   now** — without a keystore or claim code, this app boots in "unclaimed" mode (imajin-ai#2427):
-   approve on `/jin` → open `<this app>/claim` → paste the code → done.
+   start on a raw `DYKIL_APP_PRIVATE_KEY` still being set. Without a keystore, this app boots
+   in "unclaimed" mode (imajin-ai#2427): approve on `/jin` → open `/dykil/claim` →
+   paste the code in the browser → done. This is the only claim path; no env edit or restart.
 3. **Install dependencies** — `@ima-jin/auth`, `@ima-jin/auth-client`, `@ima-jin/config`, and `@ima-jin/logger`
    are published to npmjs.org under the `@ima-jin` scope. Anonymous install, no token needed:
    ```bash
@@ -126,7 +127,7 @@ src/
 scripts/
   import-legacy.ts  <- one-pass legacy backport, dry-run by default
 api-spec/          <- this app's own OpenAPI document, served at /api/spec
-instrumentation.ts <- refuses to boot without a fetchable signing key (loadAppSigningKey())
+instrumentation.ts <- restores an existing identity, or boots unclaimed for /dykil/claim
 middleware.ts      <- gates every route on claim state — unclaimed page, /claim 404 once claimed (imajin-ai#2427)
 ```
 

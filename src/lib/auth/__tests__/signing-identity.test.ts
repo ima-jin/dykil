@@ -62,42 +62,41 @@ function useKeystoreEnv(tmpPrefix: string): { keystorePath: () => string } {
 describe('src/lib/auth/signing-identity', () => {
   const env = useKeystoreEnv('dykil-keystore-');
 
-  it('first boot: redeems the claim code for the signing key and persists a bootstrap keystore', async () => {
-    process.env.IMAJIN_APP_CLAIM_CODE = 'one-time-code';
+  it('browser claim: redeems the submitted code and persists a bootstrap keystore', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ appDid: 'did:imajin:dykil-app', privateKey: 'deadbeef', publicKey: 'pub-hex' }),
+      json: async () => ({ appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { bootstrapSigningIdentity, getSigningIdentity, isAppClaimed } = await import('../signing-identity');
-    await bootstrapSigningIdentity();
+    const { claimWithCode, getSigningIdentity, isAppClaimed } = await import('../signing-identity');
+    await claimWithCode({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' });
 
-    expect(getSigningIdentity()).toEqual({ appDid: 'did:imajin:dykil-app', privateKey: 'deadbeef', publicKey: 'pub-hex' });
+    expect(getSigningIdentity()).toEqual({ appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' });
     expect(isAppClaimed()).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://dev-jin.imajin.ai/api/apps/claim');
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toMatchObject({ claimCode: 'one-time-code' });
+    expect(JSON.parse(init.body)).toMatchObject({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' });
     expect(existsSync(env.keystorePath())).toBe(true);
     expect(statSync(env.keystorePath()).mode & 0o777).toBe(0o600);
   });
 
-  it('second boot: signs a fresh challenge with the persisted bootstrap key, spending no claim code', async () => {
+  it('existing keystore: re-authenticates after restart, ignoring IMAJIN_APP_CLAIM_CODE', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ appDid: 'did:imajin:dykil-app', privateKey: 'deadbeef', publicKey: 'pub-hex' }),
+      json: async () => ({ appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    process.env.IMAJIN_APP_CLAIM_CODE = 'one-time-code';
     const firstBoot = await import('../signing-identity');
-    await firstBoot.bootstrapSigningIdentity();
+    await firstBoot.claimWithCode({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' });
     fetchMock.mockClear();
 
     vi.resetModules();
-    delete process.env.IMAJIN_APP_CLAIM_CODE;
+    clearGlobalIdentity();
+    process.env.IMAJIN_APP_CLAIM_CODE = 'FAKE_IGNORED_ENV_CODE';
     process.env.IMAJIN_APP_DID = 'did:imajin:dykil-app';
 
     const { bootstrapSigningIdentity, getSigningIdentity, isAppClaimed } = await import('../signing-identity');
@@ -110,9 +109,12 @@ describe('src/lib/auth/signing-identity', () => {
     expect(url).toBe('https://dev-jin.imajin.ai/api/apps/signing-key/fetch');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toMatchObject({ appDid: 'did:imajin:dykil-app' });
+    expect(JSON.parse(init.body)).not.toHaveProperty('claimCode');
+    expect(init.body).not.toContain('FAKE_IGNORED_ENV_CODE');
   });
 
-  it('unclaimed boot mode (imajin-ai#2427): no keystore and no claim code boots without throwing', async () => {
+  it.each(['', 'FAKE_IGNORED_ENV_CODE'])('boots unclaimed without a keystore regardless of env code presence (%s)', async (envCode) => {
+    process.env.IMAJIN_APP_CLAIM_CODE = envCode;
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -125,8 +127,27 @@ describe('src/lib/auth/signing-identity', () => {
     expect(() => getSigningIdentity()).toThrow(/not bootstrapped/);
   });
 
-  it('still fails loud when a claim code IS provided but the kernel rejects it', async () => {
-    process.env.IMAJIN_APP_CLAIM_CODE = 'bad-code';
+  it('still fails loud when an existing keystore cannot re-authenticate', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { claimWithCode, bootstrapSigningIdentity, isAppClaimed, resetSigningIdentityForTests } = await import('../signing-identity');
+    await claimWithCode({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' });
+    resetSigningIdentityForTests();
+    process.env.IMAJIN_APP_DID = 'did:imajin:dykil-app';
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: 'Bootstrap authentication refused' }),
+    });
+
+    await expect(bootstrapSigningIdentity()).rejects.toThrow('bootstrap-key fetch failed');
+    expect(isAppClaimed()).toBe(false);
+  });
+
+  it('still rejects a browser claim refused by the kernel', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -134,21 +155,20 @@ describe('src/lib/auth/signing-identity', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { bootstrapSigningIdentity, isAppClaimed } = await import('../signing-identity');
+    const { claimWithCode, isAppClaimed } = await import('../signing-identity');
 
-    await expect(bootstrapSigningIdentity()).rejects.toThrow();
+    await expect(claimWithCode({ claimCode: 'FAKE_REJECTED_CLAIM_CODE' })).rejects.toThrow();
     expect(isAppClaimed()).toBe(false);
   });
 
   it('shares the identity across separately-loaded module copies (instrumentation.ts vs route bundles)', async () => {
-    const fixtureIdentity = { appDid: 'did:imajin:dykil-app', privateKey: 'fixture-private', publicKey: 'fixture-public' };
+    const fixtureIdentity = { appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' };
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => fixtureIdentity });
     vi.stubGlobal('fetch', fetchMock);
-    process.env.IMAJIN_APP_CLAIM_CODE = 'one-time-code';
 
-    // Copy A stands in for the bundle `instrumentation.ts` boots from...
+    // Copy A stands in for the bundle that activates the identity...
     const instrumentationCopy = await import('../signing-identity');
-    await instrumentationCopy.bootstrapSigningIdentity();
+    await instrumentationCopy.claimWithCode({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' });
 
     // ...copy B for a distinct route bundle: a fresh module instance with its own module scope.
     vi.resetModules();
@@ -160,7 +180,7 @@ describe('src/lib/auth/signing-identity', () => {
   });
 
   it('reads the identity from the Symbol.for(imajin.app.signingIdentity) slot on globalThis', async () => {
-    const fixtureIdentity = { appDid: 'did:imajin:dykil-app', privateKey: 'fixture-private', publicKey: 'fixture-public' };
+    const fixtureIdentity = { appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' };
     const { getSigningIdentity, isAppClaimed, resetSigningIdentityForTests } = await import('../signing-identity');
     expect(isAppClaimed()).toBe(false);
 
@@ -183,10 +203,10 @@ describe('src/lib/auth/signing-identity', () => {
 describe('src/lib/auth/signing-identity — claimWithCode', () => {
   const env = useKeystoreEnv('dykil-claim-page-');
 
-  it('hot-swaps the in-memory signing identity and persists a bootstrap keystore, without needing IMAJIN_APP_CLAIM_CODE', async () => {
+  it('hot-swaps the in-memory signing identity and persists a bootstrap keystore', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ appDid: 'did:imajin:dykil-app', privateKey: 'deadbeef', publicKey: 'pub-hex' }),
+      json: async () => ({ appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -194,7 +214,7 @@ describe('src/lib/auth/signing-identity — claimWithCode', () => {
 
     expect(isAppClaimed()).toBe(false);
 
-    const identity = await claimWithCode({ claimCode: 'operator-pasted-code' });
+    const identity = await claimWithCode({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' });
 
     expect(identity.appDid).toBe('did:imajin:dykil-app');
     expect(isAppClaimed()).toBe(true);
@@ -207,13 +227,13 @@ describe('src/lib/auth/signing-identity — claimWithCode', () => {
     process.env.IMAJIN_APP_DID = 'did:imajin:this-app';
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ appDid: 'did:imajin:a-different-app', privateKey: 'deadbeef', publicKey: 'pub-hex' }),
+      json: async () => ({ appDid: 'did:imajin:a-different-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
     const { AppDidMismatchError, claimWithCode, isAppClaimed } = await import('../signing-identity');
 
-    await expect(claimWithCode({ claimCode: 'operator-pasted-code' })).rejects.toThrow(AppDidMismatchError);
+    await expect(claimWithCode({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' })).rejects.toThrow(AppDidMismatchError);
 
     expect(isAppClaimed()).toBe(false);
     expect(existsSync(env.keystorePath())).toBe(false);

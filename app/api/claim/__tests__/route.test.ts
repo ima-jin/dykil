@@ -2,11 +2,12 @@ import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetSigningIdentityForTests } from '@/lib/auth/signing-identity';
+import { bootstrapSigningIdentity, isAppClaimed, resetSigningIdentityForTests } from '@/lib/auth/signing-identity';
 import { resetClaimRateLimitForTests } from '@/lib/claim-rate-limit';
+import { GET as health } from '../../health/route';
 import { POST } from '../route';
 
-const ENV_KEYS = ['IMAJIN_KERNEL_URL', 'IMAJIN_APP_DID', 'IMAJIN_APP_CLAIM_CODE', 'IMAJIN_APP_KEYSTORE'] as const;
+const ENV_KEYS = ['IMAJIN_KERNEL_URL', 'IMAJIN_APP_DID', 'IMAJIN_APP_KEYSTORE'] as const;
 const originalEnv: Record<string, string | undefined> = {};
 const RATE_LIMIT = 5;
 
@@ -40,6 +41,7 @@ describe('POST /api/claim', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     resetSigningIdentityForTests();
     resetClaimRateLimitForTests();
     for (const key of ENV_KEYS) {
@@ -51,14 +53,19 @@ describe('POST /api/claim', () => {
   });
 
   it('redeems a valid claim code, persists a 0600 keystore, and never returns the private key', async () => {
-    mockKernelClaim({ appDid: 'did:imajin:dykil-app', privateKey: 'deadbeef', publicKey: 'pub-hex' });
+    await bootstrapSigningIdentity();
+    expect(isAppClaimed()).toBe(false);
+    expect((await health().json()).claimed).toBe(false);
+    mockKernelClaim({ appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' });
 
-    const response = await POST(postRequest({ claimCode: 'operator-pasted-code' }) as never);
+    const response = await POST(postRequest({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' }) as never);
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ appDid: 'did:imajin:dykil-app', publicKey: 'pub-hex' });
+    expect(body).toEqual({ appDid: 'did:imajin:dykil-app', publicKey: 'FAKE_PUBLIC_KEY' });
     expect(body.privateKey).toBeUndefined();
+    expect(isAppClaimed()).toBe(true);
+    expect((await health().json()).claimed).toBe(true);
 
     expect(existsSync(keystorePath)).toBe(true);
     expect(statSync(keystorePath).mode & 0o777).toBe(0o600);
@@ -74,20 +81,33 @@ describe('POST /api/claim', () => {
   });
 
   it('maps a kernel refusal to a generic 400 without leaking the kernel error body', async () => {
-    mockKernelClaim({ error: 'This claim code has already been redeemed' }, false);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockKernelClaim({ error: 'Refused FAKE_SPENT_CLAIM_CODE with FAKE_PRIVATE_KEY' }, false);
 
-    const response = await POST(postRequest({ claimCode: 'spent-code' }) as never);
+    const response = await POST(postRequest({ claimCode: 'FAKE_SPENT_CLAIM_CODE' }) as never);
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(typeof body.error).toBe('string');
+    expect(body).toEqual({ error: 'Unable to redeem this claim code' });
+    expect(log.mock.calls).toEqual([['POST /api/claim: claim exchange failed']]);
+  });
+
+  it('does not log network error text that may echo the submitted code', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network failure FAKE_BROWSER_CLAIM_CODE')));
+
+    const response = await POST(postRequest({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' }) as never);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Unable to redeem this claim code' });
+    expect(log.mock.calls).toEqual([['POST /api/claim: claim exchange failed']]);
   });
 
   it('404s once this app is already claimed', async () => {
-    mockKernelClaim({ appDid: 'did:imajin:dykil-app', privateKey: 'deadbeef', publicKey: 'pub-hex' });
-    await POST(postRequest({ claimCode: 'first-code' }) as never);
+    mockKernelClaim({ appDid: 'did:imajin:dykil-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' });
+    await POST(postRequest({ claimCode: 'FAKE_FIRST_CLAIM_CODE' }) as never);
 
-    const response = await POST(postRequest({ claimCode: 'second-code' }) as never);
+    const response = await POST(postRequest({ claimCode: 'FAKE_SECOND_CLAIM_CODE' }) as never);
 
     expect(response.status).toBe(404);
   });
@@ -96,10 +116,10 @@ describe('POST /api/claim', () => {
     mockKernelClaim({ error: 'Unrecognized claim code' }, false);
 
     for (let attempt = 0; attempt < RATE_LIMIT; attempt += 1) {
-      await POST(postRequest({ claimCode: `attempt-${attempt}` }, { 'x-forwarded-for': '203.0.113.5' }) as never);
+      await POST(postRequest({ claimCode: 'FAKE_REJECTED_CLAIM_CODE' }, { 'x-forwarded-for': '203.0.113.5' }) as never);
     }
     const response = await POST(
-      postRequest({ claimCode: 'one-attempt-too-many' }, { 'x-forwarded-for': '203.0.113.5' }) as never
+      postRequest({ claimCode: 'FAKE_RATE_LIMITED_CODE' }, { 'x-forwarded-for': '203.0.113.5' }) as never
     );
 
     expect(response.status).toBe(429);
@@ -114,11 +134,11 @@ describe('POST /api/claim', () => {
     // loop would never trip the limit at all.
     for (let attempt = 0; attempt < RATE_LIMIT; attempt += 1) {
       await POST(
-        postRequest({ claimCode: `attempt-${attempt}` }, { 'x-forwarded-for': `10.0.0.${attempt}, 203.0.113.5` }) as never
+        postRequest({ claimCode: 'FAKE_REJECTED_CLAIM_CODE' }, { 'x-forwarded-for': `10.0.0.${attempt}, 203.0.113.5` }) as never
       );
     }
     const response = await POST(
-      postRequest({ claimCode: 'one-attempt-too-many' }, { 'x-forwarded-for': '10.0.0.99, 203.0.113.5' }) as never
+      postRequest({ claimCode: 'FAKE_RATE_LIMITED_CODE' }, { 'x-forwarded-for': '10.0.0.99, 203.0.113.5' }) as never
     );
 
     expect(response.status).toBe(429);
@@ -132,14 +152,14 @@ describe('POST /api/claim', () => {
     for (let attempt = 0; attempt < RATE_LIMIT; attempt += 1) {
       await POST(
         postRequest(
-          { claimCode: `attempt-${attempt}` },
+          { claimCode: 'FAKE_REJECTED_CLAIM_CODE' },
           { 'x-real-ip': `198.51.100.${attempt}`, 'x-forwarded-for': `10.0.0.${attempt}, 203.0.113.5` }
         ) as never
       );
     }
     const response = await POST(
       postRequest(
-        { claimCode: 'one-attempt-too-many' },
+        { claimCode: 'FAKE_RATE_LIMITED_CODE' },
         { 'x-real-ip': '198.51.100.99', 'x-forwarded-for': '10.0.0.99, 203.0.113.5' }
       ) as never
     );
@@ -149,15 +169,15 @@ describe('POST /api/claim', () => {
 
   it('refuses a claim whose kernel-returned appDid does not match IMAJIN_APP_DID, and persists nothing', async () => {
     process.env.IMAJIN_APP_DID = 'did:imajin:this-app';
-    mockKernelClaim({ appDid: 'did:imajin:a-different-app', privateKey: 'deadbeef', publicKey: 'pub-hex' });
+    mockKernelClaim({ appDid: 'did:imajin:a-different-app', privateKey: 'FAKE_PRIVATE_KEY', publicKey: 'FAKE_PUBLIC_KEY' });
 
-    const response = await POST(postRequest({ claimCode: 'operator-pasted-code' }) as never);
+    const response = await POST(postRequest({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' }) as never);
     const body = await response.json();
 
     expect(response.status).toBe(409);
     expect(body.expectedAppDid).toBe('did:imajin:this-app');
     expect(body.claimedAppDid).toBe('did:imajin:a-different-app');
-    expect(body.error).not.toContain('operator-pasted-code');
+    expect(body.error).not.toContain('FAKE_BROWSER_CLAIM_CODE');
     expect(existsSync(keystorePath)).toBe(false);
   });
 });

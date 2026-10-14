@@ -28,7 +28,7 @@ export async function getAppServiceToken(): Promise<string> {
   if (!isAppClaimed()) {
     throw new AppServiceTokenUnavailableError(
       'The app service token cannot be minted: this app has not been claimed (no signing key). ' +
-        'Provide IMAJIN_APP_CLAIM_CODE or an existing keystore — see docs/REGISTRATION.md.',
+        'Claim this app at /dykil/claim or restore its existing keystore — see docs/REGISTRATION.md.',
     );
   }
   cached = await mintAppToken({

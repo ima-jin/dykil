@@ -10,6 +10,7 @@ import { ENV_VAR_NAMES, ENV_VARS, validateEnv } from '../lib/env-manifest.mjs';
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const read = (relative: string) => readFileSync(join(ROOT, relative), 'utf8');
 const CHECK_ENV = join(ROOT, 'scripts/check-env.mjs');
+const IGNORED_CLAIM_CODE_WARNING = 'IMAJIN_APP_CLAIM_CODE is ignored — claim at /dykil/claim and delete IMAJIN_APP_CLAIM_CODE from the env file.';
 
 function childEnv(): NodeJS.ProcessEnv {
   return { PATH: process.env.PATH ?? '' } as unknown as NodeJS.ProcessEnv;
@@ -37,6 +38,23 @@ function envNamesIn(source: string): string[] {
 
 describe('env contract coverage', () => {
   const manifest = new Set(ENV_VAR_NAMES);
+  it('removes IMAJIN_APP_CLAIM_CODE except the exact check-env warning lines', () => {
+    const retired = 'IMAJIN_APP_CLAIM_CODE';
+    expect(ENV_VAR_NAMES).not.toContain(retired);
+    const result = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' });
+    expect(result.status).toBe(0);
+    for (const file of result.stdout.split('\0').filter(Boolean)) {
+      if (file.includes('__tests__/') || file.endsWith('.test.ts')) continue;
+      const matches = read(file).split('\n').filter((line) => line.includes(retired));
+      const allowed = file === 'scripts/lib/env-manifest.mjs'
+        ? [
+            "  if (get('IMAJIN_APP_CLAIM_CODE') !== '') {",
+            `    warnings.push('${IGNORED_CLAIM_CODE_WARNING}');`,
+          ]
+        : [];
+      expect(matches, file).toEqual(allowed);
+    }
+  });
 
   it('has no duplicate manifest entries and every entry is complete', () => {
     expect(new Set(ENV_VAR_NAMES).size).toBe(ENV_VAR_NAMES.length);
@@ -72,6 +90,8 @@ describe('env contract coverage', () => {
       const dist = join(base, pkg, 'dist');
       for (const file of walk(dist)) {
         for (const name of envNamesIn(readFileSync(file, 'utf8'))) {
+          // The SDK retains an env default that this app explicitly disables.
+          if (pkg === 'auth-client' && name === 'IMAJIN_APP_CLAIM_CODE') continue;
           if (!manifest.has(name)) undocumented.push(`${name} (@ima-jin/${pkg})`);
         }
       }
@@ -130,6 +150,17 @@ describe('validateEnv', () => {
 
   const validProd = () => ({ ...parseEnv(read('.env.prod.example')), IMAJIN_APP_DID: 'did:imajin:abc123' });
   const validDev = () => ({ ...parseEnv(read('.env.dev.example')), IMAJIN_APP_DID: 'did:imajin:abc123' });
+  it.each(['dev', 'prod'] as const)('warns by name only about ignored IMAJIN_APP_CLAIM_CODE on %s', (target) => {
+    const env = target === 'dev' ? validDev() : validProd();
+    const result = validateEnv({ ...env, IMAJIN_APP_CLAIM_CODE: 'FAKE_IGNORED_ENV_CODE' }, target);
+    expect(result).toEqual({ errors: [], warnings: [IGNORED_CLAIM_CODE_WARNING] });
+    expect(JSON.stringify(result)).not.toContain('FAKE_IGNORED_ENV_CODE');
+  });
+
+  it.each(['', '   \t '])('does not warn about empty or whitespace IMAJIN_APP_CLAIM_CODE (%j)', (value) => {
+    expect(validateEnv({ ...validProd(), IMAJIN_APP_CLAIM_CODE: value }, 'prod'))
+      .toEqual({ errors: [], warnings: [] });
+  });
 
   it('reports every missing required variable by name', () => {
     const { errors } = validateEnv({}, 'prod');
@@ -175,13 +206,12 @@ describe('validateEnv', () => {
     expect(errors).toMatch(/EVENTS_SERVICE_URL must include the \/events prefix/);
   });
 
-  it('warns (without failing) about first-boot, port and logging leftovers', () => {
+  it('warns (without failing) about port and logging leftovers', () => {
     const { errors, warnings } = validateEnv(
-      { ...validProd(), IMAJIN_APP_CLAIM_CODE: 'once', PORT: '9999', LOG_DB_TRANSPORT: 'true' },
+      { ...validProd(), PORT: '9999', LOG_DB_TRANSPORT: 'true' },
       'prod',
     );
     expect(errors).toEqual([]);
-    expect(warnings.join('\n')).toMatch(/IMAJIN_APP_CLAIM_CODE is set/);
     expect(warnings.join('\n')).toMatch(/PORT is set/);
     expect(warnings.join('\n')).toMatch(/LOG_DB_TRANSPORT=true/);
   });
@@ -203,6 +233,28 @@ describe('check-env CLI', () => {
     const result = cli(['prod', '--file', file]);
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/is valid for prod/);
+  });
+  it('warns exactly once on stderr about ignored IMAJIN_APP_CLAIM_CODE without printing its value', () => {
+    const file = join(dir, 'retired.env');
+    writeFileSync(file, read('.env.prod.example').replace('did:imajin:REPLACE_ME', 'did:imajin:abc123')
+      + '\nIMAJIN_APP_CLAIM_CODE=FAKE_IGNORED_ENV_CODE\n');
+    const result = cli(['prod', '--file', file]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe(`warn:  ${IGNORED_CLAIM_CODE_WARNING}\n`);
+    expect(result.stdout).toMatch(/is valid for prod/);
+    expect(result.stdout).not.toContain('IMAJIN_APP_CLAIM_CODE');
+    expect(result.stdout + result.stderr).not.toContain('FAKE_IGNORED_ENV_CODE');
+  });
+
+  it.each(['', '   \t '])('exits 0 without a CLI warning for empty or whitespace claim code (%j)', (value) => {
+    const file = join(dir, 'empty-retired.env');
+    writeFileSync(file, read('.env.prod.example').replace('did:imajin:REPLACE_ME', 'did:imajin:abc123')
+      + `\nIMAJIN_APP_CLAIM_CODE="${value}"\n`);
+    const result = cli(['prod', '--file', file]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toMatch(/is valid for prod/);
+    expect(result.stdout).not.toContain('IMAJIN_APP_CLAIM_CODE');
   });
 
   it('exits 1 for an invalid file without echoing any value', () => {

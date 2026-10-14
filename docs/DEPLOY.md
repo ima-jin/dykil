@@ -152,7 +152,8 @@ the old entry from `ima-jin/imajin-ai`'s `deploy/ecosystem.prod.config.js`.
 - **`env check` fails** — each line names a variable; see [ENVIRONMENTS.md](./ENVIRONMENTS.md).
 - **Health reports `claimed:false`** — the app is booted but unclaimed: open `<app>/claim` and paste the claim code
   (`/api/health` reports `claimed:true` once it is, including after every restart).
-- **Health never goes green on a first boot** — `pm2 logs <name>`: a used or rejected `IMAJIN_APP_CLAIM_CODE`, a
-  wrong `IMAJIN_APP_DID`, or a leftover `DYKIL_APP_PRIVATE_KEY` fails at `instrumentation.ts`. The dev and prod
-  instances must each have their own DID, claim code and keystore.
+- **Health never goes green** — `pm2 logs <name>`: an existing keystore that cannot re-authenticate,
+  a wrong `IMAJIN_APP_DID`, or a leftover `DYKIL_APP_PRIVATE_KEY` fails at `instrumentation.ts`.
+  Without a keystore the app boots unclaimed; redeem a fresh approval code only on `/dykil/claim`.
+  The dev and prod instances must each have their own DID and keystore.
 - **Login loops on dev only** — `IMAJIN_ENV=dev` is missing (wrong session cookie name).
