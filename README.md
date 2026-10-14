@@ -1,4 +1,5 @@
 # dykil — surveys & polls on Imajin primitives
+Operator identity setup uses the app's `/dykil/claim` page.
 
 > Forked from [`ima-jin/imajin-app-template`](https://github.com/ima-jin/imajin-app-template). **Read
 > [`AGENTS.md`](./AGENTS.md) first** — it defines the boundary this app must not cross.
