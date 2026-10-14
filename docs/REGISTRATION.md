@@ -3,10 +3,10 @@
 Per ima-jin/imajin-ai#1990, the kernel refuses to serve an unregistered app: every app is an
 identity — a row in the kernel's app registry — before it can compose the platform. Per
 ima-jin/imajin-ai#2411 (ruled b by Ryan, 2026-09-27), this app also never holds a raw private
-key in an env file: it **refuses to start** without a signing key it can fetch itself via
-`@ima-jin/auth-client`'s `loadAppSigningKey()` (see `instrumentation.ts` and
-`src/lib/auth/signing-identity.ts`), so registration + a kernel operator's `apps.provision`
-approval are the first things a fork needs, before `pnpm dev`.
+key in an env file. With no bootstrap keystore it starts **unclaimed**, ready for an operator
+to activate it at `/dykil/claim`. Later boots fetch the signing key through the existing keystore
+via `@ima-jin/auth-client`'s `loadAppSigningKey()` (see `instrumentation.ts` and
+`src/lib/auth/signing-identity.ts`).
 
 ## Operator runbook: prod and dev
 
@@ -34,12 +34,12 @@ here asks anyone to create, copy or paste key material.
    signing key in its vault and shows a one-time claim code (~15 minutes) **once**. Keep it out of chat, tickets and
    shell history; it is single-use and expires.
 3. **Prepare the env file** on the server: `cp .env.<env>.example .env.local && chmod 600 .env.local`, then set
-   `IMAJIN_APP_DID` to the `appDid` from step 1. Leave `IMAJIN_APP_CLAIM_CODE` unset. Run
+   `IMAJIN_APP_DID` to the `appDid` from step 1. No claim code belongs in the env file. Run
    `node scripts/check-env.mjs <dev|prod>`; it fails while the DID is still `REPLACE_ME`.
-4. **Deploy** with `scripts/deploy.sh <dev|prod>` ([DEPLOY.md](./DEPLOY.md)). With no keystore and no claim code, the
+4. **Deploy** with `scripts/deploy.sh <dev|prod>` ([DEPLOY.md](./DEPLOY.md)). With no keystore, the
    app boots **unclaimed** (imajin-ai#2427): it is healthy, `/api/health` reports `"claimed":false`, and every route
    except `/claim`, `/api/claim` and `/api/health` serves a "not claimed yet" notice.
-5. **Claim**: open the claim page from the table above and paste the code (and the app DID, if the card shows one).
+5. **Claim**: open the claim page from the table above and paste the code into the browser.
    The app calls the kernel's `POST /api/apps/claim`, writes the 0600 bootstrap keystore at `IMAJIN_APP_KEYSTORE`, and
    starts signing immediately. No ssh, no env edit, no restart. The code is spent; `/claim` returns 404 from then on.
 6. **Verify**: `curl -fsS <public URL>/api/health` reports `"claimed":true`, and it still does after
@@ -47,9 +47,10 @@ here asks anyone to create, copy or paste key material.
 7. **Register the attestation types** once per kernel (step 5 below), as the developer DID.
 
 No key material in logs: the app and the deploy script never print the claim code, the keystore contents or the
-signing key; `check-env.mjs` prints variable names only. Do not add logging around the claim or keystore paths. If
-the CI claim path is used instead (`IMAJIN_APP_CLAIM_CODE` in the env file), remove the variable after the first
-successful boot: `check-env.mjs` warns while it is set.
+signing key; `check-env.mjs` prints variable names only. Do not add logging around the claim or keystore paths.
+The claim page is the only claim path, including for automation; boot never redeems an env code.
+An already-claimed installation needs no new approval or claim after upgrade: keep its existing
+`IMAJIN_APP_KEYSTORE` path and `IMAJIN_APP_DID` unchanged.
 
 **Lost keystore, or a code that expired unused:** do not create a keypair by hand. Ask the kernel operator to
 re-approve `apps.provision` with `reissueClaim: true` for a fresh code, then repeat steps 5 and 6. Back up
@@ -102,17 +103,17 @@ code** exactly once (`data.claimCode` on the `/jin` decision card). Copy it imme
 it cannot be retrieved again; if it's lost or expires unused, the operator re-approves
 `apps.provision` with `reissueClaim: true` for a fresh one.
 
-### The operator path (recommended): paste the code in the browser
+### The only claim path: paste the code in the browser
 
-Open `<this app's URL>/claim` and paste the claim code (and the app DID, if the card shows one, to
-confirm you're claiming the right app). Submit — no ssh, no env file edit, no restart. This app's
+Open `<this app's URL>/claim` (`/dykil/claim`) and paste the claim code in the browser.
+Submit — no ssh, no env file edit, no restart. This app's
 own `app/api/claim/route.ts` calls the kernel's `POST /api/apps/claim` on your behalf, writes the
 local bootstrap keystore (`IMAJIN_APP_KEYSTORE`, default `./.imajin/keystore.json`, mode `0600`),
 and hot-swaps the in-memory signing identity immediately. `/claim` 404s once this succeeds; the
 code is spent and cannot be reused.
 
-This is only possible because this app boots in **unclaimed mode** (imajin-ai#2427) when neither a
-keystore nor `IMAJIN_APP_CLAIM_CODE` is present: instead of crashing at boot, every route except
+This is possible because this app boots in **unclaimed mode** (imajin-ai#2427) when no
+keystore is present: instead of crashing at boot, every route except
 `/claim`, `/api/claim`, and `/api/health` serves a minimal "not claimed yet" page, and
 `/api/health` reports `{ claimed: false }`.
 
@@ -132,10 +133,10 @@ sound if both of these hold:
 
 Without a usable `X-Forwarded-For`, all callers share one coarse fallback bucket.
 
-### The advanced / CI path: an env var
+### Subsequent boots: existing keystore
 
-On this app's own first boot, `loadAppSigningKey()` mints its own Ed25519 "bootstrap" keypair,
-exchanges the claim code plus that keypair's public half for the real signing key via
+When the browser claim succeeds, `loadAppSigningKey()` mints its own Ed25519 "bootstrap" keypair,
+exchanges the browser-submitted code plus that keypair's public half for the real signing key via
 `POST /api/apps/claim`, and persists ONLY the bootstrap keypair (never the signing key) in a
 local keystore file. Every later boot re-authenticates with that persisted bootstrap key via
 `POST /api/apps/signing-key/fetch` — no claim code spent, no operator action needed. See
@@ -161,17 +162,16 @@ cp .env.example .env.local
 #   IMAJIN_KERNEL_URL=<kernel node>          (e.g. https://dev-jin.imajin.ai)
 #   IMAJIN_APP_DID=<appDid from step 1>
 #   NEXT_PUBLIC_IMAJIN_APP_ID=<id from step 1>
-#   IMAJIN_APP_CLAIM_CODE=<optional — leave unset and claim via <app>/claim in the browser instead>
 #   AUTH_SERVICE_URL=<kernel node>/auth      (e.g. https://dev-jin.imajin.ai/auth)
 #   MEDIA_SERVICE_URL=<kernel node>/media    (e.g. https://dev-jin.imajin.ai/media)
 # IMAJIN_APP_KEYSTORE is optional (defaults to ./.imajin/keystore.json) — never commit it
-# or the claim code; delete IMAJIN_APP_CLAIM_CODE from .env.local once boot succeeds once.
+# or put a claim code in this file. Claim only through /dykil/claim in the browser.
 ```
 
-Without a signing key it can fetch via `loadAppSigningKey()`, `pnpm dev` / `pnpm start` throw
-immediately (`instrumentation.ts`) instead of serving requests no kernel call could ever
-authenticate — and it fails just as loudly if a raw `DYKIL_APP_PRIVATE_KEY` is still set,
-since this app never reads a private key from env.
+Without a keystore, `pnpm dev` / `pnpm start` boot unclaimed and point to `/dykil/claim`.
+With an existing keystore, a failed signing-key fetch still throws immediately
+(`instrumentation.ts`), as does a raw `DYKIL_APP_PRIVATE_KEY` still being set:
+this app never reads a private key from env.
 
 ## 5. Register the response-attestation types (one-time, before going live)
 

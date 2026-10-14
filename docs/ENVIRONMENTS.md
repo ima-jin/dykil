@@ -52,13 +52,11 @@ Missing any of these and `scripts/check-env.mjs` fails the deploy before anythin
 | `NEXT_PUBLIC_APP_URL` | runtime | `https://dev-jin.imajin.ai/dykil` | `https://jin.imajin.ai/dykil` | This app's public URL. Not the token audience — path-routed apps share one host (imajin-ai#2706); the audience is this app's registry slug (see `IMAJIN_APP_AUD`). |
 | `IMAJIN_APP_DID` | runtime | `did:imajin:<dev app DID>` | `did:imajin:<prod app DID>` | This app's own did:imajin:… from registration (docs/REGISTRATION.md); dev and prod each have their own. Required on every boot once a keystore exists. Not a secret. |
 
-## First boot only
+## Claiming an app
 
-Advanced/CI path only. The normal path needs no variable at all — paste the claim code at `<app>/claim`.
-
-| Variable | When | Dev | Prod | What it does |
-|---|---|---|---|---|
-| `IMAJIN_APP_CLAIM_CODE` **(secret)** | runtime | (only for the CI claim path) | (only for the CI claim path) | Advanced/CI fallback. The normal operator path is pasting the one-time code from the kernel operator's /jin approval card on `<app>/claim` (imajin-ai#2427) — no env var needed. If set, it is spent on first boot (no keystore yet) or a lost-keystore rebind; delete it afterwards. |
+With no keystore the app boots unclaimed and directs the operator to `/dykil/claim`.
+Approve `apps.provision` on `/jin`, then paste the one-time code only in that browser page.
+This is the only claim path — no env edit or restart. Existing keystores keep booting unchanged.
 
 ## Optional
 
@@ -158,9 +156,8 @@ DYKIL_EVENTS_AUTHORIZATION_ID=
 
 # --- Identity (operator step: docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME
-# The normal path needs no claim code in this file: open
+# Claim only in the browser: open
 # https://dev-jin.imajin.ai/dykil/claim after the first deploy and paste it.
-# IMAJIN_APP_CLAIM_CODE=
 # Persistent, per-environment keystore (must survive deploys):
 IMAJIN_APP_KEYSTORE=/home/jin/.imajin/dykil.dev.keystore.json
 
@@ -198,9 +195,8 @@ DYKIL_EVENTS_AUTHORIZATION_ID=
 
 # --- Identity (operator step: docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME
-# The normal path needs no claim code in this file: open
+# Claim only in the browser: open
 # https://jin.imajin.ai/dykil/claim after the first deploy and paste it.
-# IMAJIN_APP_CLAIM_CODE=
 # Persistent, per-environment keystore (must survive deploys):
 IMAJIN_APP_KEYSTORE=/home/jin/.imajin/dykil.prod.keystore.json
 
@@ -212,8 +208,8 @@ LOG_LEVEL=info
 
 ## Secrets handling
 
-- `LEGACY_DATABASE_URL` (carries a database password) and, on the CI claim path only, `IMAJIN_APP_CLAIM_CODE` are the
-  only secret-bearing variables a correct deployment sets. Keep `.env.local` mode `0600`, owned by the deploy user,
+- `LEGACY_DATABASE_URL` (carries a database password) is the only secret-bearing variable a correct deployment
+  sets. Claim codes belong only in the browser claim page. Keep `.env.local` mode `0600`, owned by the deploy user,
   never in git. Use a read-only database role for the legacy URL.
 - This app's signing key is **never** in an env file — `DYKIL_APP_PRIVATE_KEY` makes the app refuse to boot. The key is
   fetched at boot by `loadAppSigningKey()`; only the 0600 bootstrap keystore (`IMAJIN_APP_KEYSTORE`) is persisted.

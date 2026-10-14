@@ -160,10 +160,10 @@ describe('scripts/import-legacy', () => {
 
   it('requires a fetchable signing key to --commit', async () => {
     bootstrapSigningIdentityMock.mockRejectedValue(
-      new Error("loadAppSigningKey: no keystore found and no claim code provided — first boot requires IMAJIN_APP_CLAIM_CODE"),
+      new Error('Signing identity not bootstrapped yet — claim this app at /dykil/claim'),
     );
     const { runImport } = await import('../import-legacy');
-    await expect(runImport(['--commit'])).rejects.toThrow('IMAJIN_APP_CLAIM_CODE');
+    await expect(runImport(['--commit'])).rejects.toThrow('/dykil/claim');
     expect(getSigningIdentityMock).not.toHaveBeenCalled();
   });
 

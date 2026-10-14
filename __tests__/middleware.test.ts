@@ -30,6 +30,8 @@ describe('middleware', () => {
     expect(response.status).toBe(200);
     const text = await response.text();
     expect(text.toLowerCase()).toContain('not claimed yet');
+    expect(text).toContain('href="/dykil/claim"');
+    expect(text).toContain('/jin approval card');
   });
 
   it('passes /claim through when unclaimed', async () => {

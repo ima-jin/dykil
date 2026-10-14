@@ -23,9 +23,9 @@ file before touching code — it defines the boundary you must not cross and the
 
 1. Use this template.
 2. Register the app with the kernel — [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
-3. Set env: `cp .env.example .env.local` and fill it in (the app refuses to start without a
-   signing key it can fetch via `loadAppSigningKey()` — see `instrumentation.ts` and
-   `docs/REGISTRATION.md`; never a raw private key in the env file).
+3. Set env: `cp .env.example .env.local` and fill in non-secret config. Without a keystore the app
+   boots unclaimed; approve on `/jin`, then claim only at `/dykil/claim` in the browser — see
+   `docs/REGISTRATION.md`. Existing keystores re-authenticate via `loadAppSigningKey()`.
 4. This app owns no database — there is no migration step; deploys run a read-only legacy baseline instead
    ([`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)). See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and
    `FINDINGS.md`. To deploy dev or prod: [`docs/DEPLOY.md`](./docs/DEPLOY.md) (`scripts/deploy.sh <dev|prod>`).

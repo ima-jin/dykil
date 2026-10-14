@@ -25,7 +25,6 @@ export const BASE_PATH = '/dykil';
  * The variables themselves live in env-vars.json (data, not code). Fields:
  * status:
  *   required         must be set in the env file for a deployed instance
- *   first-boot       only for the advanced/CI claim path, then removed
  *   optional         read, has a safe default (or a documented degraded mode) when unset
  *   forbidden        must NOT be set (the app refuses to boot if it is)
  *   runtime-set      injected by Next.js / pm2 / next.config.mjs — not set in the env file
@@ -145,9 +144,6 @@ function collectWarnings(get, target) {
   const port = get('PORT');
   if (port !== '' && port !== String(TARGETS[target].port)) {
     warnings.push(`PORT is set in the env file but ${TARGETS[target].name} runs on ${TARGETS[target].port}; the pm2 entry's value wins.`);
-  }
-  if (get('IMAJIN_APP_CLAIM_CODE') !== '') {
-    warnings.push('IMAJIN_APP_CLAIM_CODE is set — it is needed on the first boot only; remove it once the app has booted once.');
   }
   const keystore = get('IMAJIN_APP_KEYSTORE');
   if (keystore === '') {
