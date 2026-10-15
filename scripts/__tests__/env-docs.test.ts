@@ -36,6 +36,54 @@ function envNamesIn(source: string): string[] {
   return [...names];
 }
 
+describe('app provisioning manifest', () => {
+  const manifest = JSON.parse(read('imajin.app.json'));
+
+  it('parses as an explicit secrets-only manifest with no random self-secrets', () => {
+    // Keep registry/nav declarations out until their existing values are confirmed.
+    expect(Object.keys(manifest)).toEqual(['secrets']);
+    expect(manifest.secrets).toEqual([]);
+  });
+
+  it('matches the kernel AppManifest and validateSecrets contract', () => {
+    // ima-jin/imajin-ai apps/kernel/src/lib/github/org-provisioning.ts and
+    // apps/kernel/src/lib/apps/secret-declarations.ts (also PR #2814).
+    // The secrets-only subset needs no optional nav/scope declarations.
+    expect(manifest).toBeTypeOf('object');
+    expect(manifest).not.toBeNull();
+    expect(Array.isArray(manifest)).toBe(false);
+    expect(Array.isArray(manifest.secrets)).toBe(true);
+    expect(manifest.secrets.length).toBeLessThanOrEqual(32);
+    const names = new Set<string>();
+    for (const secret of manifest.secrets) {
+      expect(Object.keys(secret).sort()).toEqual(['kind', 'name']);
+      expect(secret.name).toMatch(/^[A-Z][A-Z0-9_]{0,63}$/);
+      expect(['random-32B', 'random-64B']).toContain(secret.kind);
+      expect(names.has(secret.name)).toBe(false);
+      names.add(secret.name);
+    }
+  });
+
+  it('only declares secret names that the app reads, not script or legacy credentials', () => {
+    const files = [
+      ...walk(join(ROOT, 'app')),
+      ...walk(join(ROOT, 'src')),
+      join(ROOT, 'middleware.ts'),
+    ];
+    const names = new Set(files.flatMap((file) => envNamesIn(readFileSync(file, 'utf8'))));
+    // env.ts also reads through its private required(name) accessor.
+    for (const match of read('src/lib/env.ts').matchAll(/required\('([A-Z][A-Z0-9_]+)'\)/g)) {
+      names.add(match[1]);
+    }
+    for (const secret of manifest.secrets) {
+      expect(names.has(secret.name), secret.name).toBe(true);
+      const variable = ENV_VARS.find((entry) => entry.name === secret.name);
+      expect(variable?.secret, secret.name).toBe(true);
+      expect(['required', 'optional'], secret.name).toContain(variable?.status);
+    }
+  });
+});
+
 describe('env contract coverage', () => {
   const manifest = new Set(ENV_VAR_NAMES);
   it('removes IMAJIN_APP_CLAIM_CODE except the exact check-env warning lines', () => {
