@@ -26,4 +26,6 @@ export async function register(): Promise<void> {
   }
 
   await bootstrapSigningIdentity();
+  const { migrateEnvironment } = await import('./scripts/lib/migrate-environment.mjs');
+  await migrateEnvironment(process.env);
 }

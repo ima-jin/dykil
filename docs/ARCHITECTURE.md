@@ -1,11 +1,12 @@
 # Architecture — dykil
 
-> This app is a **lens** over the user's signed records, and owns zero tables of its own. See `AGENTS.md` §1–§3
-> and Ryan's ruling on issue #1985 (2026-09-22, DECISION #1985→c) for why.
+> This app is a **lens** over the user's signed records, with no table-backed application behavior. It owns the
+> two legacy `dykil` tables and migration ledger under #1991's 2026-10-14 ruling; this does not reopen #1985's
+> signed-document/attestation model. See `AGENTS.md` §1–§3 and `docs/MIGRATIONS.md`.
 
 ## Ryan's ruling, restated
 
-dykil does not earn a domain schema. It is rebuilt on kernel primitives:
+dykil does not add a new domain storage model. It is rebuilt on kernel primitives:
 
 - **Survey definition = a signed document** — a media asset (`GET/POST {kernel}/media/api/assets`), owned by the
   survey owner's DID. The kernel signs the asset's `.fair` manifest on the owner's behalf today (`ContentSigner`,

@@ -133,6 +133,13 @@ function checkIdentity(get, target, errors) {
 }
 
 function checkLegacyDatabase(get, errors) {
+  const migrationUrl = get('DATABASE_URL');
+  if (migrationUrl !== '' && !/^postgres(ql)?:$/.test(parseUrl(migrationUrl)?.protocol ?? '')) {
+    errors.push('DATABASE_URL must be a postgres:// or postgresql:// URL.');
+  }
+  if (migrationUrl !== '' && get('APP_DB_SCHEMA') !== 'dykil') {
+    errors.push('APP_DB_SCHEMA must be exactly dykil when DATABASE_URL is set.');
+  }
   const legacyUrl = get('LEGACY_DATABASE_URL');
   if (legacyUrl !== '' && !/^postgres(ql)?:$/.test(parseUrl(legacyUrl)?.protocol ?? '')) {
     errors.push('LEGACY_DATABASE_URL must be a postgres:// or postgresql:// URL.');

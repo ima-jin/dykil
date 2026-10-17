@@ -26,8 +26,9 @@ file before touching code — it defines the boundary you must not cross and the
 3. Set env: `cp .env.example .env.local` and fill in non-secret config. Without a keystore the app
    boots unclaimed; approve on `/jin`, then claim only at `/dykil/claim` in the browser — see
    `docs/REGISTRATION.md`. Existing keystores re-authenticate via `loadAppSigningKey()`.
-4. This app owns no database — there is no migration step; deploys run a read-only legacy baseline instead
-   ([`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)). See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and
+4. This app owns the legacy `dykil` schema and its migrations (#1991, 2026-10-14 ruling), not new table-backed
+   application behavior. Boot migrates only with explicit `DATABASE_URL` + `APP_DB_SCHEMA=dykil`; the separate
+   `LEGACY_DATABASE_URL` stays read-only ([`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)). See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and
    `FINDINGS.md`. To deploy dev or prod: [`docs/DEPLOY.md`](./docs/DEPLOY.md) (`scripts/deploy.sh <dev|prod>`).
 5. `pnpm dev`.
 
@@ -195,7 +196,8 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
 
 - **What it is:** Surveys & polls, rebuilt on kernel primitives (refs #1985) — a survey is a
   signed document (media asset), a response is an attestation, and ticket-holder checks
-  compose through a boolean gate. This app owns no database of its own.
+  compose through a boolean gate. It owns migration lifecycle for the two legacy `dykil` tables and an app-local
+  ledger, not new table-backed application storage (#1991). Request-time behavior remains database-free.
 - **App DID:** _<did:imajin:… — set at registration, docs/REGISTRATION.md>_
 - **Scopes:** routes ask a token for `dykil:read` (GET) or `dykil:write` (mutations), via the
   `requireScopes` option of the single `authenticate()` interface
@@ -215,8 +217,9 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
 - **Connectors it consumes:** none. The only cross-app composition is the events app's
   ticket-holder gate (`src/lib/ticket-gate.ts`, imajin-ai#2395).
 - **Scope guardrails specific to this app:** never read `events`/ticket rows directly, even
-  for a ticket-scoped survey — always go through the gate. Never store a survey or response
-  in a table of its own (Ryan's ruling, 2026-09-22). Never sign an attestation with this
+  for a ticket-scoped survey — always go through the gate. Never store new application surveys or responses
+  in tables (Ryan's ruling, 2026-09-22); #1991 owns only the retained legacy schema's migration lifecycle.
+  Never sign an attestation with this
   app's own key on behalf of a respondent — only NODE-WITNESSED LEGACY-IMPORT rows are
   self-signed by this app; every new response must carry the respondent's own signature.
   Never call `@ima-jin/auth`'s auth primitives directly from a route — always go through

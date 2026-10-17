@@ -6,7 +6,8 @@ info:
     Surveys & polls, rebuilt on Imajin kernel primitives (refs #1985): a
     survey is a signed document (kernel media asset), a response is an
     attestation, and ticket-holder checks compose through a boolean gate.
-    This app owns no database of its own.
+    Request-time behavior uses no database of its own; this repo separately
+    owns the legacy dykil schema's migration lifecycle.
 servers:
   - url: https://dykil.imajin.ai
     description: production

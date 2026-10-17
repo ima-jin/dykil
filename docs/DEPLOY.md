@@ -39,7 +39,8 @@ Note that step 2 swaps in the new ref's `deploy.sh`, so a change to the script i
 4. **install** — `pnpm install --frozen-lockfile`.
 5. **build** — `next build` with `.env.local` loaded, so `NEXT_PUBLIC_*` values are baked in.
 6. **legacy baseline** — `scripts/legacy-baseline.mjs`: read-only, idempotent, refuses on a schema or data mismatch.
-   There is no migrate step: dykil owns no database. See [MIGRATIONS.md](./MIGRATIONS.md).
+   This step never migrates. Server boot separately runs app-owned migrations only with `DATABASE_URL` and
+   `APP_DB_SCHEMA=dykil`; absent migration credentials skip loudly. See [MIGRATIONS.md](./MIGRATIONS.md).
 7. **restart** — `pm2 startOrReload ecosystem.config.cjs --only <prod|dev>-dykil --update-env`, then `pm2 save`.
 8. **health** — polls `/dykil/api/health` for up to 60 s and requires `"status":"ok"`. A non-healthy result exits
    non-zero. A healthy-but-unclaimed app (`"claimed":false`) is the expected state on an environment's first deploy;
@@ -140,8 +141,9 @@ Verify: `curl -fsS https://jin.imajin.ai/dykil/api/health` → `{"status":"ok","
 
 ## Rollback
 
-Redeploy the previous tag or sha: `scripts/deploy.sh prod --ref <previous-tag>`. dykil has no migrations, so a
-rollback never has to undo a schema change. To go back to the monorepo-era app, `pm2 delete prod-dykil` and restore
+Redeploy the previous tag or sha: `scripts/deploy.sh prod --ref <previous-tag>`. There are no automatic down
+migrations: preserve schema/data and evaluate compatibility before rolling application code back. Older runners
+refuse unknown ledger history. To go back to the monorepo-era app, `pm2 delete prod-dykil` and restore
 the old entry from `ima-jin/imajin-ai`'s `deploy/ecosystem.prod.config.js`.
 
 ## Troubleshooting

@@ -254,6 +254,13 @@ describe('validateEnv', () => {
     expect(errors).toMatch(/EVENTS_SERVICE_URL must include the \/events prefix/);
   });
 
+  it('validates separate migration URL/schema without requiring them for read-only deployments', () => {
+    expect(validateEnv({ ...validProd(), DATABASE_URL: '', APP_DB_SCHEMA: '' }, 'prod').errors).toEqual([]);
+    expect(validateEnv({ ...validProd(), DATABASE_URL: 'mysql://h/db' }, 'prod').errors.join('\n')).toContain('DATABASE_URL must be a postgres');
+    expect(validateEnv({ ...validProd(), DATABASE_URL: 'postgresql://h/db', APP_DB_SCHEMA: 'events' }, 'prod').errors.join('\n')).toContain('APP_DB_SCHEMA must be exactly dykil');
+    expect(validateEnv({ ...validProd(), DATABASE_URL: 'postgresql://h/db', APP_DB_SCHEMA: 'dykil' }, 'prod').errors).toEqual([]);
+  });
+
   it('warns (without failing) about port and logging leftovers', () => {
     const { errors, warnings } = validateEnv(
       { ...validProd(), PORT: '9999', LOG_DB_TRANSPORT: 'true' },
