@@ -129,7 +129,7 @@ describe('scripts/deploy.sh', () => {
     expect(stdout).toContain(`${envFile} scripts/legacy-baseline.mjs`);
   });
 
-  it('baselines before restarting, and never migrates (dykil owns no database)', () => {
+  it('verifies legacy data before restarting; migration credentials are handled separately at boot', () => {
     const { stdout } = deploy(['prod', '--dry-run']);
     expect(stdout.indexOf('legacy-baseline.mjs')).toBeLessThan(stdout.indexOf('pm2 startOrReload'));
     expect(stdout).not.toMatch(/drizzle|db:migrate/);

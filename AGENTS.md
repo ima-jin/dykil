@@ -26,8 +26,9 @@ file before touching code — it defines the boundary you must not cross and the
 3. Set env: `cp .env.example .env.local` and fill in non-secret config. Without a keystore the app
    boots unclaimed; approve on `/jin`, then claim only at `/dykil/claim` in the browser — see
    `docs/REGISTRATION.md`. Existing keystores re-authenticate via `loadAppSigningKey()`.
-4. This app owns no database — there is no migration step; deploys run a read-only legacy baseline instead
-   ([`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)). See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and
+4. This app owns the legacy `dykil` schema and its migrations (#1991, 2026-10-14 ruling), not new table-backed
+   application behavior. Boot migrates only with explicit `DATABASE_URL` + `APP_DB_SCHEMA=dykil`; the separate
+   `LEGACY_DATABASE_URL` stays read-only ([`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)). See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and
    `FINDINGS.md`. To deploy dev or prod: [`docs/DEPLOY.md`](./docs/DEPLOY.md) (`scripts/deploy.sh <dev|prod>`).
 5. `pnpm dev`.
 
@@ -195,7 +196,8 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
 
 - **What it is:** Surveys & polls, rebuilt on kernel primitives (refs #1985) — a survey is a
   signed document (media asset), a response is an attestation, and ticket-holder checks
-  compose through a boolean gate. This app owns no database of its own.
+  compose through a boolean gate. It owns migration lifecycle for the two legacy `dykil` tables and an app-local
+  ledger, not new table-backed application storage (#1991). Request-time behavior remains database-free.
 - **App DID:** _<did:imajin:… — set at registration, docs/REGISTRATION.md>_
 - **Scopes:** routes ask a token for `dykil:read` (GET) or `dykil:write` (mutations), via the
   `requireScopes` option of the single `authenticate()` interface

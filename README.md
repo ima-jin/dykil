@@ -9,14 +9,16 @@ Operator identity setup uses the app's `/dykil/claim` page.
 primitives per Ryan's ruling (2026-09-22, DECISION #1985→c) — see [`FINDINGS.md`](./FINDINGS.md).
 
 This repository **is the app** — a real, arms-length third-party application that composes the Imajin platform
-**only through its public app surface**. It holds **no `workspace:*` deps, no monorepo internals, no database of
-its own, no in-process bus**. A survey is a signed document (a kernel media asset); a response is an attestation;
+**only through its public app surface**. It holds **no `workspace:*` deps, no monorepo internals, no request-time
+database storage, no in-process bus**. It owns the legacy `dykil` schema's migration lifecycle (#1991), not new
+table-backed application behavior. A survey is a signed document (a kernel media asset); a response is an attestation;
 a ticket-holder check composes through a boolean gate on the events app.
 
 ## What it replaces
 
 The original `apps/dykil` (still live in `ima-jin/imajin-ai` until Run 2 of #1985 removes it) stored surveys and
-responses in its own `dykil.surveys` / `dykil.survey_responses` Postgres tables. This rebuild has zero tables.
+responses in its own `dykil.surveys` / `dykil.survey_responses` Postgres tables. This rebuild does not use those
+tables for new surveys/responses; it owns their schema history plus `dykil._migrations`.
 `scripts/import-legacy.ts` backports the old data one time: definitions become signed documents, and existing
 (never respondent-signed) responses become NODE-WITNESSED LEGACY-IMPORT attestations — distinguishable from
 genuine respondent-signed ones in the data, and never upgraded.
@@ -61,8 +63,10 @@ scripts/deploy.sh prod    # pm2 prod-dykil, port 7101, https://jin.imajin.ai/dyk
 
 - **Identity:** each environment claims its own app identity through the kernel's claim flow — the operator
   runbook is in [`docs/REGISTRATION.md`](./docs/REGISTRATION.md#operator-runbook-prod-and-dev). Nothing here mints keys.
-- **Migration baseline:** there are no migrations. Every deploy runs a read-only, idempotent check of the legacy
-  `dykil.*` schema and data that refuses on mismatch and never writes — [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+- **Migrations:** `pnpm migrate` requires separate `DATABASE_URL` and `APP_DB_SCHEMA=dykil`; boot runs the same
+  transactional runner only when that URL is set. Existing matching schemas are adopted without replaying DDL or
+  changing data; absent migration credentials skip loudly without using the read-only `LEGACY_DATABASE_URL`.
+  Every deploy retains the separate read-only legacy verifier — [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
 - **Env:** `.env.example` (local), `.env.dev.example`, `.env.prod.example`; every variable is documented in
   [`docs/ENVIRONMENTS.md`](./docs/ENVIRONMENTS.md) and validated by `node scripts/check-env.mjs <dev|prod>`.
 

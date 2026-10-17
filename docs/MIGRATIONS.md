@@ -1,65 +1,99 @@
-# Migrations and the legacy baseline
+# App-owned migrations and the read-only legacy verifier
+The 2026-10-14 ruling on [imajin-ai#1991](https://github.com/ima-jin/imajin-ai/issues/1991) lifts the
+per-app migration deferral for dykil. This repo owns `dykil.surveys`, `dykil.survey_responses` and its
+`dykil._migrations` ledger. It does **not** introduce new table-backed application behavior: new surveys remain
+signed documents, responses remain attestations, and ticket-holder access still goes through the events API.
+The legacy import (#2522) and events' remaining legacy reads (#2542) are not changed or retired here.
 
-dykil has **no migrations** and owns **no database** (Ryan's ruling, 2026-09-22, DECISION #1985→c): a survey is a
-signed document (a kernel media asset) and a response is an attestation. This page records why no migration was
-carried into this repo (imajin-ai#2520), and what runs instead on every deploy.
+## Baseline provenance (root history stays immutable)
+`migrations/0001_dykil_baseline.sql` represents the final dykil-only schema from the kernel root history:
+- `0001_seed.sql`: two tables, primary keys, six btree indexes and the intra-dykil cascading foreign key.
+- `0008_survey_response_ticket_id.sql`: nullable `ticket_id` and its partial btree index.
+- `0025_backfill_survey_responses_for_orphan_registrations.sql` and
+  `0026_clone_shared_survey_responses_per_ticket.sql`: historical cross-owner data backfills, **not replayed**.
+  Their existing rows must be preserved; fresh databases have no legacy data to backfill.
+- `0027_drop_ticket_registrations.sql` mentions dykil in historical commentary but only changes events.
 
-## The per-table decision
+These are all root SQL references to dykil at the cut. `migrations/ownership.json` in the kernel assigns both
+tables to dykil; no root file is moved, edited, deleted, squashed or re-ledgered. The public root ledger is untouched.
+New kernel migrations cannot touch the externally-owned schema (companion kernel PR
+[imajin-ai#2844](https://github.com/ima-jin/imajin-ai/pull/2844)). No app SQL references another owner's schema.
 
-The migration rule for apps (imajin-ai#1991) is that an app's migrations stay with the app only for tables it owns.
-The old monorepo `apps/dykil` had two tables, both created by the monorepo's shared root migrations
-(`0001_seed.sql`, plus `0008` for `ticket_id`):
-
-| Table | Owner | Decision | Why |
-|---|---|---|---|
-| `dykil.surveys` | dykil (legacy) | **No migration here.** Retained read-only until retired. | Not kernel-owned. Each row becomes a signed document via `scripts/import-legacy.ts`. A table in this repo would contradict the zero-table ruling. |
-| `dykil.survey_responses` | dykil (legacy) | **No migration here.** Retained read-only until retired. | Not kernel-owned. Each row becomes a NODE-WITNESSED LEGACY-IMPORT attestation. The events app still reads it cross-schema (imajin-ai#2542) until it is moved off. |
-
-Neither is a kernel-owned table, so **none of dykil's migrations stay**. The shared root migrations
-(`0001`, `0008`, `0025`, `0026`) are the kernel repo's history and are never copied or replayed here. In particular,
-`0025`/`0026` touch `events` tables, which this app must never do.
-
-The tables are **not dropped**. Retiring them is a separate, deliberate operator step, taken only after the import
-has been verified (imajin-ai#2522) and the events app no longer reads them (imajin-ai#2542). This repo never issues a
-`DROP`, `TRUNCATE`, `ALTER` or write against them.
-
-## What runs instead: the legacy baseline
-
-`scripts/legacy-baseline.mjs` is the baseline for the existing prod and dev schema **and data**. `scripts/deploy.sh`
-runs it on every deploy (step 6), before the process is restarted.
+## Explicit operator entrypoint
+From the repository root, with migration credentials supplied securely in the environment:
 
 ```bash
-node --env-file=.env.local scripts/legacy-baseline.mjs            # what deploy.sh runs
-node --env-file=.env.local scripts/legacy-baseline.mjs --require  # fail instead of skip when no URL is set
+APP_DB_SCHEMA=dykil pnpm migrate
+# Or load an operator-owned env file containing DATABASE_URL and APP_DB_SCHEMA:
+node --env-file=.env.local scripts/migrate.mjs
 ```
 
-It reads `LEGACY_DATABASE_URL` (use a read-only role) and checks that the live `dykil` schema is exactly what
-`scripts/import-legacy.ts` was written against:
+`DATABASE_URL` is **required** for the explicit command. `APP_DB_SCHEMA` must be exactly `dykil`; neither defaults
+to an arbitrary schema nor accepts identifiers/SQL. It never falls back to `LEGACY_DATABASE_URL`.
+Use a role restricted to owning/writing the `dykil` schema; do not grant write access to kernel/other app schemas.
+An operator must provision that schema/role access appropriately; fresh-database schema creation requires database
+CREATE privilege (a dedicated disposable app database is preferred). Credentials are never printed or provisioned here.
+Driver error details are suppressed; refusal logs disclose no row content or connection strings. Exit 0 means
+success/no pending files; 1 means refused/failed with nothing committed; 2 means invalid CLI arguments.
 
-- **Idempotent, trivially.** It only reads, so running it again is a no-op. There is deliberately no tracking table:
-  that would be an app-owned table. The "baseline" is the pinned expectation in
-  `scripts/lib/legacy-baseline-core.mjs` (`EXPECTED_TABLES`), not a row in a database.
-- **Refuses on mismatch, loudly.** It introspects `pg_catalog` (tables, columns, types, nullability, defaults,
-  primary and foreign keys, required indexes) and the data invariants the importer relies on (no orphaned responses,
-  known `status`/`type` values, `fields` and `answers` are JSON objects). Any difference exits **1** with the full list
-  of problems, and the deploy stops before restarting. Extra tables, extra columns and unique constraints are
-  mismatches too: their data would not be imported. Constraint and index *names* are not compared, and extra
-  indexes are tolerated.
-- **Never drops, truncates, alters or inserts.** Every statement is a `SELECT`, issued inside `BEGIN READ ONLY` and
-  rolled back, so Postgres itself rejects a write. The test suite audits every statement it issues.
-- **No content leaves the database.** Output is counts only. Row content and connection details are never printed.
-- **Fresh databases** (no `dykil` schema) report "nothing to baseline" and exit 0.
-- **Skipped loudly** when `LEGACY_DATABASE_URL` is unset (exit 0, a `SKIPPED` line). Use that once the legacy data is
-  retired; use `--require` to forbid it.
+The callable interface is `loadMigrations(directory?)` and
+`runMigrations(pgClient, { schema: 'dykil', migrations })` from `scripts/lib/migrations-core.mjs`.
+It requires a dedicated connected client with no open transaction; the runner owns the transaction.
+The default directory is `<process.cwd()>/migrations`, so run from the repo root.
 
-Exit codes: `0` verified, fresh or skipped · `1` refused (mismatch) · `2` usage, configuration or connection error.
+## Transaction, adoption and failure behavior
+One transaction and a transaction-scoped advisory lock serialize concurrent runs before inspecting schema/ledger.
+The runner sets a local `pg_catalog` search path; all writes explicitly target dykil.
+- **Fresh database (schema absent):** create only dykil, execute baseline SQL and record its SHA-256.
+- **Existing matching schema without ledger:** check live columns/types/defaults/nullability, keys (including
+  FK target schema), indexes, catalog objects and importer data invariants. Record baseline as applied in the new
+  ledger **without executing baseline DDL, altering tables, replaying data backfills or changing any existing row**.
+- **Existing mismatched/partial/empty schema:** fail closed, with no repair and no committed ledger.
+- **Existing ledger:** filenames/checksums must match a contiguous prefix of local files. Changed, removed,
+  unknown, reordered or empty ledger history fails closed. With baseline-only history the live legacy shape is
+  checked again; subsequent reviewed migrations own their schema evolution.
+- **Pending files:** execute sorted SQL and record each checksum in the same transaction. Any failure rolls back
+  the entire run, including schema/ledger creation; retry after fixing the cause, never force or rewrite applied SQL.
 
-A refusal means the schema or data drifted from what was audited. Do **not** edit the script to force it through:
-reconcile the database by hand (or tell the app owner), then re-run.
+SQL files use a deliberately small additive dialect: schema-qualified `CREATE TABLE`, `CREATE INDEX ... USING
+btree`, and one `ALTER TABLE ... ADD COLUMN` per statement. DML, transaction control, procedural SQL, arbitrary
+functions, reserved ledger references and cross-schema references are refused. Expand the supported dialect only
+with reviewed boundary tests. This guard is defense in depth, not a substitute for schema-restricted DB privileges.
+There are no down migrations or automatic retirement/drop operations.
 
-## If dykil ever needs a table of its own
+## Boot and existing deployments
+The Next.js node instrumentation hook runs the same adapter before serving requests. With no `DATABASE_URL`,
+boot prints **SKIPPED**, writes nothing and continues; it does not require migration credentials simply because
+the current deployment has a read-only `LEGACY_DATABASE_URL`. Setting `DATABASE_URL` enables fail-fast migrations
+and requires `APP_DB_SCHEMA=dykil`. `next build` does not run the hook or need database credentials.
+Deploy workflows/release behavior are unchanged. `scripts/deploy.sh` retains its separate read-only check before
+restart; operators can explicitly migrate before restart if they want schema refusal before stopping an old process.
 
-It should not: that reopens the zero-table ruling. If a future change genuinely needs one, it needs a new DECISION
-card first. The rule then is the app-owned-schema rule in imajin-ai#1991: one Postgres schema, named for the app,
-never a kernel-owned or another app's schema, with additive, guarded (`IF NOT EXISTS`) migrations that are never
-squashed or dropped.
+## Read-only legacy verifier and import
+`scripts/legacy-baseline.mjs` continues to use **only** `LEGACY_DATABASE_URL` (read-only role), inside
+`BEGIN READ ONLY`/`ROLLBACK`. It accepts the new ledger without writing it. It never calls the migration runner.
+
+```bash
+node --env-file=.env.local scripts/legacy-baseline.mjs
+node --env-file=.env.local scripts/legacy-baseline.mjs --require
+```
+
+Exit 0: verified, schema absent, or loud skip when URL absent. Exit 1: schema/data mismatch.
+Exit 2: usage/configuration/connection failure. `--require` makes absent legacy credentials an error.
+This verifier still checks counts and importer invariants, not application storage behavior. It tolerates extra
+indexes and ignores index/constraint names, as before. The migration adoption checks add stricter catalog guards.
+Do not force a mismatch through: reconcile the database deliberately and rerun.
+
+## Tests and rollout evidence
+`pnpm test` runs the existing Vitest suite plus migration unit tests. For real SQL:
+
+```bash
+TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/dykil_test pnpm test:sql
+```
+
+Use an isolated disposable database: tests destroy its dykil schema. CI runs a dedicated PostgreSQL 16 SQL job
+and also runs SQL tests during coverage generation. Tests cover fresh builds, populated adoption with unchanged
+rows/xmin/relfilenodes, reruns, concurrent locking, checksum/history refusal, drift and transaction rollback.
+Kernel companion validation replays full root history and compares baseline schema output; live dev/prod restore
+verification remains operator work, tracked by the
+[DECISION card on #1991](https://github.com/ima-jin/imajin-ai/issues/1991#issuecomment-6228023270).

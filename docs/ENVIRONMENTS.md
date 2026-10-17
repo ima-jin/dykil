@@ -33,9 +33,9 @@ read only by an operator script (`scripts/legacy-baseline.mjs`, `scripts/import-
   `check-env.mjs` rejects a dev file pointing at a non-`dev-` host and a prod file pointing at a `dev-` host.
 - **`IMAJIN_ENV`.** `dev` on dev (selects the `imajin_session_dev` cookie), **unset** on prod. A production build is
   `NODE_ENV=production` on both, so this is the only thing that tells dev from prod.
-- **No database of its own.** dykil owns no schema, so there is no `DATABASE_URL` or `APP_DB_SCHEMA`. The only
-  database variable is `LEGACY_DATABASE_URL`, a read-only connection to the old `dykil.*` tables
-  ([MIGRATIONS.md](./MIGRATIONS.md)).
+- **Legacy schema ownership, not new storage behavior.** Optional `DATABASE_URL` + `APP_DB_SCHEMA=dykil` enable
+  app-owned migrations at boot (required for explicit `pnpm migrate`). Absent migration credentials skip loudly.
+  `LEGACY_DATABASE_URL` remains separate and read-only, never a fallback ([MIGRATIONS.md](./MIGRATIONS.md)).
 - **Identity.** Each environment has its own app DID, claim code and keystore ([REGISTRATION.md](./REGISTRATION.md)).
 - **Port.** dev 3101, prod 7101 (from `ecosystem.config.cjs`, not the env file).
 
@@ -59,6 +59,12 @@ Approve `apps.provision` on `/jin`, then paste the one-time code only in that br
 This is the only claim path — no env edit or restart. Existing keystores keep booting unchanged.
 
 ## Optional
+
+`DATABASE_URL` is an optional secret migration connection (runtime/CLI, both dev and prod); leave unset to
+retain current read-only legacy deployments. `APP_DB_SCHEMA` must be exactly `dykil` whenever it is enabled.
+Use a schema-restricted migration role, not the read-only legacy role. No request handler consumes this URL.
+`TEST_DATABASE_URL` is test-only, points to a disposable Postgres database, and is never used for application boot.
+The real-SQL test suite destroys only that database's `dykil` schema; never point it at dev/prod.
 
 Read by the app, its dependencies or its scripts, and safe to leave unset (the default or degraded mode is noted).
 

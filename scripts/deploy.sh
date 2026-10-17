@@ -16,8 +16,8 @@
 #   5. build       next build, env file loaded (NEXT_PUBLIC_* is baked in here)
 #   6. baseline    scripts/legacy-baseline.mjs — READ-ONLY verification of the
 #                  legacy dykil.* schema + data (idempotent; refuses on
-#                  mismatch). dykil owns no database, so there is nothing to
-#                  migrate and nothing is ever written, altered or dropped.
+#                  mismatch). This step never writes. Optional app-owned
+#                  migrations run at server boot with separate credentials.
 #   7. restart     pm2 startOrReload ecosystem.config.cjs --only <prod|dev>-dykil
 #   8. health      GET <base path>/api/health must report status "ok"
 #

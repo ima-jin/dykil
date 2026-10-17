@@ -1,4 +1,7 @@
 # FINDINGS — dykil rebuilt on kernel primitives (refs #1985)
+Historical findings below describe the rebuild. The 2026-10-14 #1991 ruling subsequently transfers migration
+ownership of the retained legacy `dykil` schema to this repo, with an app-local ledger. That does not add
+table-backed survey/response behavior or reopen #1985's signed-document/attestation model. See `docs/MIGRATIONS.md`.
 
 Run 1 of 2 for #1985 (new-repo side). This is the honest record the issue asked for: every
 primitive I needed and couldn't reach through the public contract, filed as issues on

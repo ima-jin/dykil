@@ -3,17 +3,17 @@
  * ima-jin/imajin-ai#2520). Pure logic: takes anything with a `query(sql)`
  * method (a `pg` Client), so it is unit-testable without a database.
  *
- * Why read-only: dykil owns no database (Ryan's ruling, 2026-09-22, #1985->c).
+ * The legacy importer remains read-only; #1991 transfers migration ownership,
+ * not application storage behavior.
  * The two legacy tables, `dykil.surveys` and `dykil.survey_responses`, were
  * created by the monorepo's shared root migrations and are NOT kernel-owned
- * tables, so no migration is carried into this repo (docs/MIGRATIONS.md). What
+ * tables; app-local migrations now own their lifecycle (docs/MIGRATIONS.md). What
  * the operator needs before a cutover is proof that the live prod/dev schema
  * and data are exactly what `scripts/import-legacy.ts` was written against.
  * That is all this does:
  *
  *   - Idempotent by construction: it never writes, so running it again is a
- *     no-op. There is no tracking table to create — that would be an
- *     app-owned table, which the ruling forbids.
+ *     no-op. The read-only verifier never creates the migration ledger.
  *   - Refuses on mismatch: any difference in tables, columns, types,
  *     nullability, defaults, primary/foreign keys, required indexes, or in the
  *     data invariants the importer relies on throws BaselineMismatchError
@@ -100,7 +100,8 @@ WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.atti
     JOIN pg_catalog.pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = k.attnum
     ORDER BY k.ord
   ) AS columns,
-  ref.relname AS ref_table,
+  ref.relname AS ref_table, refns.nspname AS ref_schema,
+  con.convalidated AS validated,
   ARRAY(
     SELECT att.attname::text
     FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
@@ -112,6 +113,7 @@ FROM pg_catalog.pg_constraint con
 JOIN pg_catalog.pg_class rel ON rel.oid = con.conrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = rel.relnamespace
 LEFT JOIN pg_catalog.pg_class ref ON ref.oid = con.confrelid
+LEFT JOIN pg_catalog.pg_namespace refns ON refns.oid = ref.relnamespace
 WHERE n.nspname = $1 AND con.contype IN ('p', 'u', 'f')`,
   indexes: `SELECT t.relname AS table_name, i.relname AS index_name,
   ARRAY(
@@ -188,6 +190,8 @@ function compareConstraints(table, expected, live, problems) {
       (c) =>
         same(c.columns, want.columns) &&
         c.ref_table === want.refTable &&
+        (c.ref_schema === undefined || c.ref_schema === LEGACY_SCHEMA) &&
+        c.validated !== false &&
         same(c.ref_columns, want.refColumns) &&
         c.on_delete === want.onDelete,
     );
@@ -222,7 +226,7 @@ function compareSchema({ tables, columns, constraints, indexes }) {
     compareIndexes(name, spec.indexes, forTable(indexes), problems);
   }
   for (const name of liveTables) {
-    if (!(name in EXPECTED_TABLES)) {
+    if (!(name in EXPECTED_TABLES) && name !== '_migrations') {
       problems.push(`${LEGACY_SCHEMA}.${name}: unexpected table (its data would not be imported).`);
     }
   }
@@ -256,26 +260,30 @@ async function compareData(client) {
 export async function runLegacyBaseline(client) {
   await client.query('BEGIN READ ONLY');
   try {
-    if ((await rows(client, 'schemaExists', [LEGACY_SCHEMA])).length === 0) {
-      return { status: 'fresh-database' };
-    }
-    const schemaProblems = compareSchema({
-      tables: await rows(client, 'tables', [LEGACY_SCHEMA]),
-      columns: await rows(client, 'columns', [LEGACY_SCHEMA]),
-      constraints: await rows(client, 'constraints', [LEGACY_SCHEMA]),
-      indexes: await rows(client, 'indexes', [LEGACY_SCHEMA]),
-    });
-    if (schemaProblems.length > 0) {
-      // Data checks reference columns that may not exist; the schema comes first.
-      throw new BaselineMismatchError(schemaProblems);
-    }
-    const dataProblems = await compareData(client);
-    if (dataProblems.length > 0) {
-      throw new BaselineMismatchError(dataProblems);
-    }
-    const [{ surveys, responses }] = await rows(client, 'counts');
-    return { status: 'verified', surveys, responses };
+    return await verifyLegacyBaseline(client);
   } finally {
     await client.query('ROLLBACK');
   }
+}
+
+/** Catalog/data verification inside the caller's transaction; never writes. */
+export async function verifyLegacyBaseline(client) {
+  if ((await rows(client, 'schemaExists', [LEGACY_SCHEMA])).length === 0) {
+    return { status: 'fresh-database' };
+  }
+  const schemaProblems = compareSchema({
+    tables: await rows(client, 'tables', [LEGACY_SCHEMA]),
+    columns: await rows(client, 'columns', [LEGACY_SCHEMA]),
+    constraints: await rows(client, 'constraints', [LEGACY_SCHEMA]),
+    indexes: await rows(client, 'indexes', [LEGACY_SCHEMA]),
+  });
+  if (schemaProblems.length > 0) {
+    throw new BaselineMismatchError(schemaProblems);
+  }
+  const dataProblems = await compareData(client);
+  if (dataProblems.length > 0) {
+    throw new BaselineMismatchError(dataProblems);
+  }
+  const [{ surveys, responses }] = await rows(client, 'counts');
+  return { status: 'verified', surveys, responses };
 }

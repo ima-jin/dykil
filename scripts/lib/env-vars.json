@@ -105,6 +105,23 @@
     "prod": "(operator-created attestation id)"
   },
   {
+    "name": "DATABASE_URL",
+    "status": "optional",
+    "phase": "runtime",
+    "secret": true,
+    "summary": "Separate dykil migration connection. Required for explicit migrations; absent at boot skips loudly. Never falls back to the read-only legacy connection.",
+    "dev": "(unset unless migrations enabled)",
+    "prod": "(unset unless migrations enabled)"
+  },
+  {
+    "name": "APP_DB_SCHEMA",
+    "status": "optional",
+    "phase": "runtime",
+    "summary": "Must be exactly dykil when migration DATABASE_URL is set. No cross-schema writes.",
+    "dev": "dykil",
+    "prod": "dykil"
+  },
+  {
     "name": "LEGACY_DATABASE_URL",
     "status": "optional",
     "phase": "script",
