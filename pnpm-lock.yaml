@@ -12,7 +12,7 @@ importers:
         specifier: ^0.8.15
         version: 0.8.15(next@15.5.26(@types/node@20.19.43)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       '@ima-jin/auth-client':
-        specifier: ^0.8.21
+        specifier: 0.8.21
         version: 0.8.21(next@15.5.26(@types/node@20.19.43)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       '@ima-jin/config':
         specifier: ^0.8.15

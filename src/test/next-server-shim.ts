@@ -29,6 +29,13 @@ export class NextRequest extends Request {
 }
 
 export class NextResponse extends Response {
+  static redirect(url: string | URL, status = 307): NextResponse {
+    return new NextResponse(null, {
+      status,
+      headers: { location: url.toString() },
+    });
+  }
+
   static json(body: unknown, init?: ResponseInit): NextResponse {
     const headers = new Headers(init?.headers);
     if (!headers.has('content-type')) {

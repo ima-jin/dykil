@@ -55,7 +55,7 @@ export default defineConfig({
       optimizer: {
         ssr: {
           enabled: true,
-          include: ['@ima-jin/auth', '@ima-jin/auth-client', '@ima-jin/config', '@ima-jin/logger'],
+          include: ['@ima-jin/auth', '@ima-jin/auth-client', '@ima-jin/auth-client/middleware', '@ima-jin/config', '@ima-jin/logger'],
         },
       },
     },
@@ -69,7 +69,7 @@ export default defineConfig({
       // coverage report only lists files matched by `include`, none of that
       // coverage was ever surfaced to SonarCloud; the file silently read as
       // 0% covered instead.
-      include: ['app/**/*.ts', 'app/**/*.tsx', 'src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.ts', 'scripts/lib/**/*.mjs'],
+      include: ['middleware.ts', 'app/**/*.ts', 'app/**/*.tsx', 'src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.ts', 'scripts/lib/**/*.mjs'],
       exclude: [
         '**/__tests__/**',
         '**/*.test.ts',
