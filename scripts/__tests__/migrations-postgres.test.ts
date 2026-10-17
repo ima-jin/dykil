@@ -14,6 +14,13 @@ describe.skipIf(!connectionString)('real PostgreSQL app migrations', () => {
     await client.connect();
     migrations = await loadMigrations();
   });
+
+  it('refuses a drifted ledger definition instead of trusting its rows', async () => {
+    await run();
+    await client.query('ALTER TABLE dykil._migrations ADD COLUMN extra text');
+    await expect(run()).rejects.toThrow('ledger shape mismatch');
+    expect((await client.query('SELECT count(*)::int AS n FROM dykil._migrations')).rows[0].n).toBe(1);
+  });
   beforeEach(async () => {
     await client.query('DROP SCHEMA IF EXISTS dykil CASCADE');
   });
@@ -105,9 +112,28 @@ describe.skipIf(!connectionString)('real PostgreSQL app migrations', () => {
     expect((await client.query("SELECT to_regnamespace('dykil') AS schema")).rows[0].schema).toBeNull();
   });
 
+  it('applies pending SQL once and rejects missing local applied files', async () => {
+    await run();
+    const sql = 'ALTER TABLE dykil.surveys ADD COLUMN note text;';
+    const next = [...migrations, { name: '0002_note.sql', sql, checksum: checksum(sql) }];
+    expect(await runMigrations(client, { schema: 'dykil', migrations: next })).toEqual([{ name: '0002_note.sql', adopted: false }]);
+    expect(await runMigrations(client, { schema: 'dykil', migrations: next })).toEqual([]);
+    await expect(run()).rejects.toThrow('mismatch');
+  });
+
+  it('rolls back adoption ledger creation when a later pending file fails', async () => {
+    await client.query('CREATE SCHEMA dykil');
+    await client.query(migrations[0].sql);
+    const sql = 'CREATE INDEX broken ON dykil.surveys USING btree (missing_column);';
+    await expect(runMigrations(client, { schema: 'dykil', migrations: [...migrations, { name: '0002_broken.sql', sql, checksum: checksum(sql) }] })).rejects.toThrow();
+    expect((await client.query("SELECT to_regclass('dykil._migrations') AS ledger")).rows[0].ledger).toBeNull();
+    expect((await client.query("SELECT to_regclass('dykil.surveys') AS table")).rows[0].table).toBe('dykil.surveys');
+  });
+
   it('serializes concurrent runners into one ledger entry', async () => {
     const second = new pg.Client({ connectionString });
     await second.connect();
+    await second.query("SET default_transaction_isolation = 'repeatable read'");
     try {
       const results = await Promise.all([run(), runMigrations(second, { schema: 'dykil', migrations })]);
       expect(results.map((result) => result.length).sort()).toEqual([0, 1]);

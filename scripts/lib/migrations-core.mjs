@@ -11,6 +11,24 @@ export function validateSchema(schema) {
   if (schema !== 'dykil') throw new Error('APP_DB_SCHEMA must be exactly dykil.');
 }
 
+async function readLedger(client, migrations) {
+  const { rows: columns } = await client.query(`SELECT a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
+  a.attnotnull, pg_catalog.pg_get_expr(d.adbin, d.adrelid) AS default
+FROM pg_catalog.pg_attribute a
+LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+WHERE a.attrelid = 'dykil._migrations'::regclass AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum`);
+  const expected = [
+    { attname: 'name', type: 'text', attnotnull: true, default: null },
+    { attname: 'checksum', type: 'text', attnotnull: true, default: null },
+    { attname: 'applied_at', type: 'timestamp with time zone', attnotnull: true, default: 'now()' },
+  ];
+  if (JSON.stringify(columns) !== JSON.stringify(expected)) throw new Error('Migration ledger shape mismatch.');
+  const { rows: applied } = await client.query('SELECT name, checksum FROM dykil._migrations ORDER BY name');
+  validateLedger(applied, migrations);
+  if (applied.length === 0) throw new Error('Existing migration ledger is empty; refusing ambiguous adoption.');
+  return applied;
+}
+
 /**
  * Deliberately small plain-SQL dialect: additive tables, columns and indexes.
  * No procedural SQL, DML, quoted identifiers, arbitrary function calls, transaction
@@ -27,6 +45,17 @@ export function validateSql(sql) {
   for (const statement of statements) {
     validateStatement(statement);
   }
+}
+
+/** Each file must finish before the next; concurrent SQL would break ordering. */
+async function applyPending(client, pending, adoptBaseline, index = 0) {
+  const migration = pending[index];
+  if (migration === undefined) return [];
+  const adopted = adoptBaseline && migration.name === BASELINE;
+  if (!adopted) await client.query(migration.sql);
+  await client.query('INSERT INTO dykil._migrations (name, checksum) VALUES ($1, $2)', [migration.name, migration.checksum]);
+  const remaining = await applyPending(client, pending, adoptBaseline, index + 1);
+  return [{ name: migration.name, adopted }, ...remaining];
 }
 
 async function verifyMigrationBaseline(client) {
@@ -117,16 +146,16 @@ export async function runMigrations(client, { schema, migrations }) {
     validateSql(migration.sql);
     if (checksum(migration.sql) !== migration.checksum) throw new Error('Invalid migration checksum.');
   }
-  await client.query('BEGIN');
+  // A waiting advisory-lock SELECT must not pin a repeatable-read snapshot
+  // taken before another runner commits schema/ledger creation.
+  await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
   try {
     await client.query("SELECT pg_catalog.pg_advisory_xact_lock(1991, 1)");
     await client.query('SET LOCAL search_path = pg_catalog');
     const { rows: [state] } = await client.query("SELECT to_regnamespace('dykil') IS NOT NULL AS present, to_regclass('dykil._migrations') IS NOT NULL AS ledger");
     let applied = [];
     if (state.ledger) {
-      ({ rows: applied } = await client.query('SELECT name, checksum FROM dykil._migrations ORDER BY name'));
-      validateLedger(applied, migrations);
-      if (applied.length === 0) throw new Error('Existing migration ledger is empty; refusing ambiguous adoption.');
+      applied = await readLedger(client, migrations);
       if (applied.length === 1) await verifyMigrationBaseline(client);
     } else if (state.present) {
       // Verify before ANY DDL. No baseline replay, table alteration or data write on adoption.
@@ -137,13 +166,7 @@ export async function runMigrations(client, { schema, migrations }) {
     if (!state.ledger) {
       await client.query('CREATE TABLE dykil._migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamp with time zone NOT NULL DEFAULT now())');
     }
-    const completed = [];
-    for (const migration of migrations.slice(applied.length)) {
-      const adopt = state.present && !state.ledger && migration.name === BASELINE;
-      if (!adopt) await client.query(migration.sql);
-      await client.query('INSERT INTO dykil._migrations (name, checksum) VALUES ($1, $2)', [migration.name, migration.checksum]);
-      completed.push({ name: migration.name, adopted: adopt });
-    }
+    const completed = await applyPending(client, migrations.slice(applied.length), state.present && !state.ledger);
     await client.query('COMMIT');
     return completed;
   } catch (error) {

@@ -217,8 +217,9 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
 - **Connectors it consumes:** none. The only cross-app composition is the events app's
   ticket-holder gate (`src/lib/ticket-gate.ts`, imajin-ai#2395).
 - **Scope guardrails specific to this app:** never read `events`/ticket rows directly, even
-  for a ticket-scoped survey — always go through the gate. Never store a survey or response
-  in a table of its own (Ryan's ruling, 2026-09-22). Never sign an attestation with this
+  for a ticket-scoped survey — always go through the gate. Never store new application surveys or responses
+  in tables (Ryan's ruling, 2026-09-22); #1991 owns only the retained legacy schema's migration lifecycle.
+  Never sign an attestation with this
   app's own key on behalf of a respondent — only NODE-WITNESSED LEGACY-IMPORT rows are
   self-signed by this app; every new response must carry the respondent's own signature.
   Never call `@ima-jin/auth`'s auth primitives directly from a route — always go through

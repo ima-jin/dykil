@@ -64,7 +64,7 @@ describe('migration boundaries', () => {
       return { rows: [] };
     }) };
     await expect(runMigrations(client, { schema: 'dykil', migrations: await loadMigrations() })).rejects.toThrow('database failure');
-    expect(client.query.mock.calls.map(([sql]) => sql)).toEqual(['BEGIN', 'SELECT pg_catalog.pg_advisory_xact_lock(1991, 1)', 'ROLLBACK']);
+    expect(client.query.mock.calls.map(([sql]) => sql)).toEqual(['BEGIN ISOLATION LEVEL READ COMMITTED', 'SELECT pg_catalog.pg_advisory_xact_lock(1991, 1)', 'ROLLBACK']);
   });
 });
 
