@@ -36,6 +36,10 @@ WHERE a.attrelid = 'dykil._migrations'::regclass AND a.attnum > 0 AND NOT a.atti
  * A database role restricted to dykil remains the deployment privilege boundary.
  */
 export function validateSql(sql) {
+  // The supported dialect uses standard SQL literals, not PostgreSQL escape
+  // strings. Reject backslashes before masking literals so E-string escaping
+  // cannot make the validator and PostgreSQL disagree about statement boundaries.
+  if (sql.includes('\\')) throw new Error('Escape strings are unsupported in migrations.');
   const text = sql.replaceAll(/'(?:[^']|'')*'|--[^\n]*/g, (token) => token.startsWith("'") ? "''" : '');
   if (/["$/\\]/.test(text) || /_migrations\b/i.test(text)) {
     throw new Error('Migration contains unsupported SQL or reserved ledger references.');

@@ -35,6 +35,7 @@ describe('migration boundaries', () => {
     'ALTER TABLE dykil.a ADD COLUMN x text, DROP COLUMN id;',
     "CREATE TABLE dykil.a (id text DEFAULT '--'); COMMIT;",
     'CREATE TABLE dykil.a (id text) TABLESPACE other;',
+    String.raw`CREATE TABLE dykil.a (id text DEFAULT E'escaped\\text');`,
   ])('rejects unsupported or cross-owner SQL: %s', (sql) => {
     expect(() => validateSql(sql)).toThrow();
   });
