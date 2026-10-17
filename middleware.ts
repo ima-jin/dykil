@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { readKeystore, resolveKeystorePath } from '@ima-jin/auth-client';
+import { forwardAuthCallback } from '@ima-jin/auth-client/middleware';
 import { withBasePath } from '@/lib/base-path';
 
 /**
@@ -59,6 +60,19 @@ function htmlResponse(status: number, title: string, message: string): NextRespo
 }
 
 export function middleware(request: NextRequest): NextResponse {
+  // The kernel returns to the registered app home URL. Consume that return
+  // before the claim gate; the callback route itself still goes through it.
+  const callback = forwardAuthCallback(request, {
+    publicUrl: process.env.NEXT_PUBLIC_APP_URL,
+    basePath: withBasePath('/'),
+  });
+  if (callback) {
+    return callback;
+  }
+  return appMiddleware(request);
+}
+
+function appMiddleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const claimed = hasKeystore();
 
