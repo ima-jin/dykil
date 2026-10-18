@@ -14,7 +14,7 @@
     "test:coverage": "vitest run --coverage",
     "import-legacy": "tsx scripts/import-legacy.ts",
     "check-env": "node scripts/check-env.mjs",
-    "baseline": "node --env-file=.env.local scripts/legacy-baseline.mjs",
+    "baseline": "node --import tsx scripts/legacy-baseline.mjs",
     "migrate": "node scripts/migrate.mjs",
     "test:sql": "vitest run scripts/__tests__/migrations-postgres.test.ts",
     "deploy:dev": "scripts/deploy.sh dev",
@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@ima-jin/auth": "^0.8.15",
-    "@ima-jin/auth-client": "^0.8.8",
+    "@ima-jin/auth-client": "^0.8.24",
     "@ima-jin/config": "^0.8.15",
     "@ima-jin/logger": "^0.8.15",
     "@ima-jin/ui": "^0.8.0",
@@ -34,6 +34,7 @@
     "survey-react-ui": "^2.5.13"
   },
   "devDependencies": {
+    "@ima-jin/vault-core": "^0.8.24",
     "@eslint/eslintrc": "^3.2.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

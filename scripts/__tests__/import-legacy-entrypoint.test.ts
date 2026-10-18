@@ -32,22 +32,21 @@ describe('scripts/import-legacy.ts entrypoint (tsx, as the operator runs it)', (
     expect(pkg.scripts['import-legacy']).toBe('tsx scripts/import-legacy.ts');
   });
 
-  it('resolves its whole module graph and reaches its own env check', () => {
+  it('resolves the boot graph and fails closed without vault configuration', () => {
     const result = runEntrypoint({});
 
     expect(result.stderr).not.toMatch(RESOLUTION_ERRORS);
-    expect(result.stderr).toContain('LEGACY_DATABASE_URL is not set');
+    expect(result.stderr).toContain('required vault configuration');
     expect(result.status).toBe(1);
   }, 60_000);
 
-  it('gets past module resolution into the database step on a dry run', () => {
-    // Nothing listens on port 1, so the connect fails fast; the point is that
-    // the script got as far as opening the connection.
-    const result = runEntrypoint({ LEGACY_DATABASE_URL: 'postgres://nobody@127.0.0.1:1/none' });
+  it('does not use an inherited legacy env credential as a fallback', () => {
+    const result = runEntrypoint({ LEGACY_DATABASE_URL: 'FAKE_ENV_VALUE_NOT_A_CONNECTION_STRING' });
 
     expect(result.stderr).not.toMatch(RESOLUTION_ERRORS);
     expect(result.stderr).toContain('Import failed:');
-    expect(result.stderr).toMatch(/ECONNREFUSED/);
+    expect(result.stderr).toContain('required vault configuration');
+    expect(result.stderr).not.toContain('FAKE_ENV_VALUE_NOT_A_CONNECTION_STRING');
     expect(result.status).toBe(1);
   }, 60_000);
 });

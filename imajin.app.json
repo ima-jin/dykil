@@ -1,3 +1,5 @@
 {
-  "secrets": []
+  "secrets": [
+    { "name": "LEGACY_DATABASE_URL", "kind": "operator-supplied" }
+  ]
 }
