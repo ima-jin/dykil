@@ -1,5 +1,6 @@
 # dykil — surveys & polls on Imajin primitives
 Operator identity setup uses the app's `/dykil/claim` page.
+Vault-backed legacy credential boot is tracked in [#25](https://github.com/ima-jin/dykil/issues/25).
 
 > Forked from [`ima-jin/imajin-app-template`](https://github.com/ima-jin/imajin-app-template). **Read
 > [`AGENTS.md`](./AGENTS.md) first** — it defines the boundary this app must not cross.
