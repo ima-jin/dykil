@@ -242,23 +242,26 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
     const assetIdBySurveyId = new Map<string, string>();
     const docBySurveyId = new Map<string, SurveyDoc>();
 
-    for (const row of surveys) {
+    // Chain each operation: preserve idempotency/rate limits, never parallelize writes.
+    await surveys.reduce<Promise<void>>(async (previous, row) => {
+      await previous;
       const assetId = await importSurveyDoc(row, commit);
       if (assetId) {
         assetIdBySurveyId.set(row.id, assetId);
         summary.documentsCreated += 1;
       }
       docBySurveyId.set(row.id, toSurveyDoc(row));
-    }
+    }, Promise.resolve());
 
     const alreadyImportedByOwner = new Map<string, Set<string>>();
 
-    for (const row of responses) {
+    await responses.reduce<Promise<void>>(async (previous, row) => {
+      await previous;
       const doc = docBySurveyId.get(row.survey_id);
       const surveyAssetId = assetIdBySurveyId.get(row.survey_id) ?? row.survey_id;
       if (!doc) {
         summary.skippedAlreadyImported += 1;
-        continue;
+        return;
       }
 
       if (commit && !alreadyImportedByOwner.has(doc.ownerDid)) {
@@ -281,7 +284,7 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
       } else if (commit) {
         summary.attestationsCreated += 1;
       }
-    }
+    }, Promise.resolve());
   } finally {
     await client.end();
   }
