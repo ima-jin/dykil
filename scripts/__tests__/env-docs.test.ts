@@ -42,7 +42,7 @@ describe('app provisioning manifest', () => {
   it('parses as an explicit secrets-only manifest with no random self-secrets', () => {
     // Keep registry/nav declarations out until their existing values are confirmed.
     expect(Object.keys(manifest)).toEqual(['secrets']);
-    expect(manifest.secrets).toEqual([]);
+    expect(manifest.secrets).toEqual([{ name: 'LEGACY_DATABASE_URL', kind: 'operator-supplied' }]);
   });
 
   it('matches the kernel AppManifest and validateSecrets contract', () => {
@@ -58,28 +58,23 @@ describe('app provisioning manifest', () => {
     for (const secret of manifest.secrets) {
       expect(Object.keys(secret).sort()).toEqual(['kind', 'name']);
       expect(secret.name).toMatch(/^[A-Z][A-Z0-9_]{0,63}$/);
-      expect(['random-32B', 'random-64B']).toContain(secret.kind);
+      expect(['random-32B', 'random-64B', 'operator-supplied']).toContain(secret.kind);
       expect(names.has(secret.name)).toBe(false);
       names.add(secret.name);
     }
   });
 
-  it('only declares secret names that the app reads, not script or legacy credentials', () => {
-    const files = [
-      ...walk(join(ROOT, 'app')),
-      ...walk(join(ROOT, 'src')),
-      join(ROOT, 'middleware.ts'),
-    ];
-    const names = new Set(files.flatMap((file) => envNamesIn(readFileSync(file, 'utf8'))));
-    // env.ts also reads through its private required(name) accessor.
-    for (const match of read('src/lib/env.ts').matchAll(/required\('([A-Z][A-Z0-9_]+)'\)/g)) {
-      names.add(match[1]);
-    }
+  it('only declares the verified legacy vault consumer, not migration or unrelated credentials', () => {
+    const boot = read('scripts/lib/legacy-vault-boot.mjs');
     for (const secret of manifest.secrets) {
-      expect(names.has(secret.name), secret.name).toBe(true);
+      expect(boot).toContain(`key: '${secret.name}', onMissing: 'fail'`);
       const variable = ENV_VARS.find((entry) => entry.name === secret.name);
       expect(variable?.secret, secret.name).toBe(true);
-      expect(['required', 'optional'], secret.name).toContain(variable?.status);
+      expect(variable?.status).toBe('forbidden');
+    }
+    for (const worker of ['scripts/lib/import-legacy.ts', 'scripts/lib/legacy-baseline.mjs']) {
+      expect(read(worker)).toContain('legacyBoot.getConfig()');
+      expect(read(worker)).not.toContain('process.env.LEGACY_DATABASE_URL');
     }
   });
 });
@@ -168,11 +163,7 @@ describe('env contract coverage', () => {
     for (const file of ['.env.example', '.env.dev.example', '.env.prod.example']) {
       const parsed = parseEnv(read(file));
       for (const variable of ENV_VARS.filter((v) => v.secret)) {
-        if (variable.name === 'LEGACY_DATABASE_URL') {
-          expect(parsed.LEGACY_DATABASE_URL ?? '', file).toMatch(/^$|:CHANGE_ME@/);
-        } else {
-          expect(parsed[variable.name] ?? '', `${file} ${variable.name}`).toBe('');
-        }
+        expect(parsed[variable.name] ?? '', `${file} ${variable.name}`).toBe('');
       }
     }
   });
@@ -241,14 +232,14 @@ describe('validateEnv', () => {
     const errors = validateEnv(
       {
         ...validProd(),
-        LEGACY_DATABASE_URL: 'mysql://h/db',
+        LEGACY_DATABASE_URL: 'FAKE_FORBIDDEN_ENV_VALUE',
         IMAJIN_APP_DID: 'abc',
         MEDIA_SERVICE_URL: 'https://jin.imajin.ai',
         EVENTS_SERVICE_URL: 'https://jin.imajin.ai/media',
       },
       'prod',
     ).errors.join('\n');
-    expect(errors).toMatch(/LEGACY_DATABASE_URL must be a postgres/);
+    expect(errors).toMatch(/LEGACY_DATABASE_URL must not be set/);
     expect(errors).toMatch(/must start with did:imajin:/);
     expect(errors).toMatch(/MEDIA_SERVICE_URL must include the \/media prefix/);
     expect(errors).toMatch(/EVENTS_SERVICE_URL must include the \/events prefix/);
@@ -314,11 +305,11 @@ describe('check-env CLI', () => {
 
   it('exits 1 for an invalid file without echoing any value', () => {
     const file = join(dir, 'bad.env');
-    writeFileSync(file, 'LEGACY_DATABASE_URL=postgres://u:supersecretvalue@h/db\nDYKIL_APP_PRIVATE_KEY=supersecretkey\n');
+    writeFileSync(file, 'LEGACY_DATABASE_URL=FAKE_FORBIDDEN_ENV_VALUE\nDYKIL_APP_PRIVATE_KEY=FAKE_FORBIDDEN_KEY\n');
     const result = cli(['prod', '--file', file]);
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/DYKIL_APP_PRIVATE_KEY must not be set/);
-    expect(result.stdout + result.stderr).not.toContain('supersecret');
+    expect(result.stdout + result.stderr).not.toContain('FAKE_FORBIDDEN');
   });
 
   it('exits 2 on a missing file, an unknown target, and stray arguments', () => {

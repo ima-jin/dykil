@@ -212,7 +212,7 @@ main() {
   run node "--env-file=${env_file}" node_modules/next/dist/bin/next build
 
   step 6 "legacy baseline (read-only; idempotent; refuses on schema/data mismatch)"
-  run node "--env-file=${env_file}" scripts/legacy-baseline.mjs
+  run node --import tsx "--env-file=${env_file}" scripts/legacy-baseline.mjs
 
   step 7 "restart ${app_name}"
   run pm2 startOrReload ecosystem.config.cjs --only "${app_name}" --update-env

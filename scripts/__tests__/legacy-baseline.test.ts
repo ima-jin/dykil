@@ -246,21 +246,21 @@ describe('runLegacyBaseline', () => {
 
 describe('scripts/legacy-baseline.mjs', () => {
   const cli = (args: string[], env: Record<string, string> = {}) =>
-    spawnSync(process.execPath, [`${ROOT}scripts/legacy-baseline.mjs`, ...args], {
+    spawnSync(process.execPath, ['--import', 'tsx', `${ROOT}scripts/legacy-baseline.mjs`, ...args], {
       env: { PATH: process.env.PATH ?? '', ...env } as unknown as NodeJS.ProcessEnv,
       encoding: 'utf8',
     });
 
-  it('skips loudly (exit 0) without LEGACY_DATABASE_URL', () => {
+  it('fails closed without required vault configuration', () => {
     const result = cli([]);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/SKIPPED/);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(/required vault configuration/);
   });
 
   it('fails with --require and no LEGACY_DATABASE_URL', () => {
     const result = cli(['--require']);
     expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/LEGACY_DATABASE_URL is not set/);
+    expect(result.stderr).toMatch(/required vault configuration/);
   });
 
   it('exits 2 on an unknown argument', () => {
@@ -268,9 +268,9 @@ describe('scripts/legacy-baseline.mjs', () => {
   });
 
   it('exits 2 on a connection failure without echoing the connection string', () => {
-    const result = cli([], { LEGACY_DATABASE_URL: 'postgres://user:supersecretvalue@127.0.0.1:1/db' });
+    const result = cli([], { LEGACY_DATABASE_URL: 'FAKE_ENV_VALUE_NOT_A_CONNECTION_STRING' });
     expect(result.status).toBe(2);
     expect(result.stderr).toMatch(/Baseline failed/);
-    expect(result.stdout + result.stderr).not.toContain('supersecretvalue');
+    expect(result.stdout + result.stderr).not.toContain('FAKE_ENV_VALUE_NOT_A_CONNECTION_STRING');
   });
 });

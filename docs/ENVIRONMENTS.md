@@ -5,8 +5,8 @@ scripts — with what it does, when it is read, and its dev and prod values. Thi
 `scripts/lib/env-manifest.mjs` are kept in lock-step by `scripts/__tests__/env-docs.test.ts`: CI fails if code
 starts reading a variable that is not documented here.
 
-No secret values live in this repo. Examples are shape-only placeholders; real values live in the untracked
-`.env.local` on each host.
+No secret values live in this repo. `LEGACY_DATABASE_URL` is vault-only, not an env-file value.
+Examples contain non-secret configuration; optional migration credentials remain a separate contract.
 
 ## The three env files
 
@@ -76,7 +76,6 @@ Read by the app, its dependencies or its scripts, and safe to leave unset (the d
 | `DYKIL_LEGACY_IMPORT_ATTESTATION_TYPE` | runtime | `dykil/survey-response-legacy-import` | `dykil/survey-response-legacy-import` | Attestation type for NODE-WITNESSED legacy-import rows (default `dykil/survey-response-legacy-import`). Used by scripts/import-legacy.ts and when reading imported responses. |
 | `EVENTS_SERVICE_URL` | runtime | `https://dev-jin.imajin.ai/events` | `https://jin.imajin.ai/events` | Events service base URL (`<kernel>/events`). Only ticket-gated surveys need it; they answer 501 until it is set. |
 | `DYKIL_EVENTS_AUTHORIZATION_ID` | runtime | (operator-created attestation id) | (operator-created attestation id) | Id of the `app.authorized` attestation granting this app `events:read`; the ticket gate mints its token against it. Operator-created per environment; ticket-gated surveys answer 501 until set. |
-| `LEGACY_DATABASE_URL` **(secret)** | script | `postgres://<read-only role>:<password>@localhost:5432/<dev_db>` | `postgres://<read-only role>:<password>@localhost:5432/<prod_db>` | Connection string for the OLD dykil.* Postgres schema, via a READ-ONLY role. Read only by scripts/legacy-baseline.mjs (deploy step 6) and scripts/import-legacy.ts — never at request time. Unset it once the legacy data is retired. |
 | `NEXT_PUBLIC_SERVICE_PREFIX` | build | (unset) | (unset) | Read by @ima-jin/config to derive service URLs. dykil takes every service URL from its own env vars; leave unset. |
 | `NEXT_PUBLIC_DOMAIN` | build | (unset) | (unset) | Companion to NEXT_PUBLIC_SERVICE_PREFIX (default imajin.ai). Leave unset. |
 | `NEXT_PUBLIC_NOTIFY_URL` | build | (unset) | (unset) | Read by the shared @ima-jin/ui NavBar for its notification bell. dykil has no notifications of its own; leave unset. |
@@ -96,6 +95,7 @@ Setting any of these is an error.
 | Variable | When | Dev | Prod | What it does |
 |---|---|---|---|---|
 | `DYKIL_APP_PRIVATE_KEY` **(secret)** | runtime | (never set) | (never set) | Removed. The app throws at boot if this is set — the signing key comes from loadAppSigningKey(), never from env. |
+| `LEGACY_DATABASE_URL` **(secret)** | script | (vault only) | (vault only) | Never set in env files. The baseline and importer fetch the operator-supplied read-only credential into typed memory before dynamically importing DB workers. Required for either command, not for web boot. |
 
 ## Set by the platform — not in the env file
 
@@ -167,8 +167,7 @@ IMAJIN_APP_DID=did:imajin:REPLACE_ME
 # Persistent, per-environment keystore (must survive deploys):
 IMAJIN_APP_KEYSTORE=/home/jin/.imajin/dykil.dev.keystore.json
 
-# --- Legacy schema (read-only role; deploy step 6 verifies it) ---
-LEGACY_DATABASE_URL=postgres://dykil_readonly:CHANGE_ME@localhost:5432/imajin_dev
+# LEGACY_DATABASE_URL is vault-only; do not set here (docs/MIGRATIONS.md).
 
 LOG_LEVEL=debug
 ```
@@ -206,17 +205,19 @@ IMAJIN_APP_DID=did:imajin:REPLACE_ME
 # Persistent, per-environment keystore (must survive deploys):
 IMAJIN_APP_KEYSTORE=/home/jin/.imajin/dykil.prod.keystore.json
 
-# --- Legacy schema (read-only role; deploy step 6 verifies it) ---
-LEGACY_DATABASE_URL=postgres://dykil_readonly:CHANGE_ME@localhost:5432/imajin_prod
+# LEGACY_DATABASE_URL is vault-only; do not set here (docs/MIGRATIONS.md).
 
 LOG_LEVEL=info
 ```
 
 ## Secrets handling
 
-- `LEGACY_DATABASE_URL` (carries a database password) is the only secret-bearing variable a correct deployment
-  sets. Claim codes belong only in the browser claim page. Keep `.env.local` mode `0600`, owned by the deploy user,
-  never in git. Use a read-only database role for the legacy URL.
+- `LEGACY_DATABASE_URL` is declared name/kind-only in `imajin.app.json`, synced on `/jin`, and
+  supplied through App secrets **Set/Rotate** with owner countersign. It is never read from env.
+  Both legacy commands fail closed without the active grant and existing bootstrap keystore.
+  See [MIGRATIONS.md](./MIGRATIONS.md#vault-backed-legacy-credential-25) for the separately coordinated cutover.
+  Claim codes belong only in the browser claim page. Keep non-secret `.env.local` config mode `0600`,
+  owned by the deploy user, never in git.
 - This app's signing key is **never** in an env file — `DYKIL_APP_PRIVATE_KEY` makes the app refuse to boot. The key is
   fetched at boot by `loadAppSigningKey()`; only the 0600 bootstrap keystore (`IMAJIN_APP_KEYSTORE`) is persisted.
   Treat that file like the claim code: never commit, copy, or sync it.

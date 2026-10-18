@@ -23,6 +23,9 @@ const {
 }));
 
 vi.mock('pg', () => ({ Client: vi.fn(() => clientMock) }));
+vi.mock('../lib/legacy-vault-boot.mjs', () => ({
+  legacyBoot: { getConfig: () => ({ legacyDatabaseUrl: 'FAKE_TEST_LEGACY_URL_NOT_A_CONNECTION_STRING' }) },
+}));
 vi.mock('@ima-jin/auth', async () => {
   const actual = await vi.importActual<typeof import('@ima-jin/auth')>('@ima-jin/auth');
   return { ...actual, sign: signMock };
@@ -84,19 +87,19 @@ describe('scripts/import-legacy', () => {
       publicKey: 'pub-hex',
     });
 
-    process.env.LEGACY_DATABASE_URL = 'postgres://legacy';
     process.env.MEDIA_SERVICE_URL = 'https://dev-jin.imajin.ai/media';
     process.env.AUTH_SERVICE_URL = 'https://dev-jin.imajin.ai/auth';
   });
 
-  it('throws when LEGACY_DATABASE_URL is not set', async () => {
-    delete process.env.LEGACY_DATABASE_URL;
-    const { runImport } = await import('../import-legacy');
-    await expect(runImport([])).rejects.toThrow('LEGACY_DATABASE_URL');
+  it('uses initialized vault configuration without reading an env credential', async () => {
+    const { Client } = await import('pg');
+    const { runImport } = await import('../lib/import-legacy');
+    await runImport([]);
+    expect(Client).toHaveBeenCalledWith({ connectionString: 'FAKE_TEST_LEGACY_URL_NOT_A_CONNECTION_STRING' });
   });
 
   it('dry-run (default, no --commit) reads legacy data but writes nothing', async () => {
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     const summary = await runImport([]);
 
     expect(summary.surveysRead).toBe(1);
@@ -108,10 +111,10 @@ describe('scripts/import-legacy', () => {
     expect(getAppServiceTokenMock).not.toHaveBeenCalled();
   });
 
-  it('dry-run needs no credentials: it never bootstraps the signing identity or mints a token', async () => {
+  it('dry-run needs no signing identity or token beyond its vault-loaded read-only DB config', async () => {
     getAppServiceTokenMock.mockRejectedValue(new Error('no credentials'));
     bootstrapSigningIdentityMock.mockRejectedValue(new Error('no credentials'));
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     await expect(runImport([])).resolves.toMatchObject({ surveysRead: 1, responsesRead: 1 });
     expect(bootstrapSigningIdentityMock).not.toHaveBeenCalled();
   });
@@ -121,7 +124,7 @@ describe('scripts/import-legacy', () => {
     vi.stubGlobal('fetch', fetchMock);
     getAppServiceTokenMock.mockRejectedValue(new Error('this app has not been claimed'));
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     await expect(runImport(['--commit'])).rejects.toThrow('has not been claimed');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(createAttestationMock).not.toHaveBeenCalled();
@@ -134,7 +137,7 @@ describe('scripts/import-legacy', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     await runImport(['--commit']);
 
     const [url, init] = fetchMock.mock.calls[0];
@@ -148,7 +151,7 @@ describe('scripts/import-legacy', () => {
   it("--commit sends the app's own token on the attestation write and the idempotency lookup", async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) }));
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     await runImport(['--commit']);
 
     expect(createAttestationMock).toHaveBeenCalledTimes(1);
@@ -162,7 +165,7 @@ describe('scripts/import-legacy', () => {
     bootstrapSigningIdentityMock.mockRejectedValue(
       new Error('Signing identity not bootstrapped yet — claim this app at /dykil/claim'),
     );
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     await expect(runImport(['--commit'])).rejects.toThrow('/dykil/claim');
     expect(getSigningIdentityMock).not.toHaveBeenCalled();
   });
@@ -173,7 +176,7 @@ describe('scripts/import-legacy', () => {
       vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) }),
     );
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     const summary = await runImport(['--commit']);
 
     expect(summary.documentsCreated).toBe(1);
@@ -209,7 +212,7 @@ describe('scripts/import-legacy', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     await runImport(['--commit']);
 
     const form = fetchMock.mock.calls[0][1].body as FormData;
@@ -231,7 +234,7 @@ describe('scripts/import-legacy', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'asset_1' }) });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     await runImport(['--commit']);
 
     const form = fetchMock.mock.calls[0][1].body as FormData;
@@ -246,7 +249,7 @@ describe('scripts/import-legacy', () => {
       { id: 'att_existing', payload: { legacyRowRef: 'dykil.survey_responses/survey_1/response_1' } },
     ]);
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     const summary = await runImport(['--commit']);
 
     expect(summary.skippedAlreadyImported).toBe(1);
@@ -259,7 +262,7 @@ describe('scripts/import-legacy', () => {
   it('throws when the kernel rejects a legacy survey document upload', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => ({}) }));
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     await expect(runImport(['--commit'])).rejects.toThrow('Failed to create signed doc for legacy survey survey_1: 502');
 
     vi.unstubAllGlobals();
@@ -272,7 +275,7 @@ describe('scripts/import-legacy', () => {
       return Promise.resolve({ rows: [] });
     });
 
-    const { runImport } = await import('../import-legacy');
+    const { runImport } = await import('../lib/import-legacy');
     const summary = await runImport([]);
 
     expect(summary.surveysRead).toBe(0);
