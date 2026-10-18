@@ -143,10 +143,10 @@ describe('scripts/deploy.sh', () => {
   });
 
   it('ignores contract variables inherited from the caller\'s shell (names only, never values)', () => {
-    const polluted = deploy(['prod', '--dry-run'], { LEGACY_DATABASE_URL: 'postgres://stray-value', IMAJIN_APP_DID: 'wrong' });
+    const polluted = deploy(['prod', '--dry-run'], { LEGACY_DATABASE_URL: 'FAKE_IGNORED_ENV_VALUE', IMAJIN_APP_DID: 'wrong' });
     expect(polluted.status).toBe(0);
     expect(polluted.stdout).toMatch(/Ignoring variables inherited from the calling shell \(the env file wins\): IMAJIN_APP_DID LEGACY_DATABASE_URL/);
-    expect(polluted.stdout).not.toContain('stray-value');
+    expect(polluted.stdout).not.toContain('FAKE_IGNORED_ENV_VALUE');
 
     expect(deploy(['prod', '--dry-run']).stdout).not.toContain('Ignoring variables inherited');
   });

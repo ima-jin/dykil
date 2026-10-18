@@ -140,10 +140,6 @@ function checkLegacyDatabase(get, errors) {
   if (migrationUrl !== '' && get('APP_DB_SCHEMA') !== 'dykil') {
     errors.push('APP_DB_SCHEMA must be exactly dykil when DATABASE_URL is set.');
   }
-  const legacyUrl = get('LEGACY_DATABASE_URL');
-  if (legacyUrl !== '' && !/^postgres(ql)?:$/.test(parseUrl(legacyUrl)?.protocol ?? '')) {
-    errors.push('LEGACY_DATABASE_URL must be a postgres:// or postgresql:// URL.');
-  }
 }
 
 function collectWarnings(get, target) {
@@ -160,9 +156,6 @@ function collectWarnings(get, target) {
     warnings.push('IMAJIN_APP_KEYSTORE is unset — the keystore will live inside the checkout; set an absolute per-environment path that survives deploys.');
   } else if (!keystore.startsWith('/')) {
     warnings.push('IMAJIN_APP_KEYSTORE is a relative path — it resolves against the process cwd; use an absolute path.');
-  }
-  if (get('LEGACY_DATABASE_URL') === '') {
-    warnings.push('LEGACY_DATABASE_URL is unset — the legacy baseline (deploy step 6) will be skipped.');
   }
   for (const name of ['ENABLE_APP_LOG', 'LOG_DB_TRANSPORT', 'ENABLE_REQUEST_LOG']) {
     if (get(name) === 'true') {

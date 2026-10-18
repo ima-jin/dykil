@@ -225,8 +225,6 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
   }
 
   const client = new Client({ connectionString: legacyDatabaseUrl });
-  await client.connect();
-
   const summary: ImportSummary = {
     surveysRead: 0,
     documentsCreated: 0,
@@ -236,6 +234,7 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
   };
 
   try {
+    await client.connect();
     const { surveys, responses } = await fetchLegacyData(client);
     summary.surveysRead = surveys.length;
     summary.responsesRead = responses.length;
@@ -244,7 +243,6 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
     const docBySurveyId = new Map<string, SurveyDoc>();
 
     for (const row of surveys) {
-      // eslint-disable-next-line no-await-in-loop -- sequential by design: idempotency and rate limits both favor one-at-a-time.
       const assetId = await importSurveyDoc(row, commit);
       if (assetId) {
         assetIdBySurveyId.set(row.id, assetId);
@@ -264,12 +262,10 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
       }
 
       if (commit && !alreadyImportedByOwner.has(doc.ownerDid)) {
-        // eslint-disable-next-line no-await-in-loop -- one lookup per distinct owner, not per row.
         alreadyImportedByOwner.set(doc.ownerDid, await fetchAlreadyImportedRefs(doc.ownerDid));
       }
       const alreadyImported = alreadyImportedByOwner.get(doc.ownerDid) ?? new Set<string>();
 
-      // eslint-disable-next-line no-await-in-loop -- sequential by design: idempotency and rate limits both favor one-at-a-time.
       const created = await importResponseAttestation({
         row,
         surveyOwnerDid: doc.ownerDid,

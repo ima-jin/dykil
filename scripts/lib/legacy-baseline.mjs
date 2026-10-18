@@ -3,18 +3,17 @@
  * Idempotent, READ-ONLY baseline of the existing legacy `dykil` schema and
  * data (refs ima-jin/imajin-ai#2520). Safe to run on every deploy.
  *
- *   node --env-file=.env.local scripts/legacy-baseline.mjs [--require]
+ *   node --import tsx scripts/legacy-baseline.mjs [--require]
  *
- * Reads LEGACY_DATABASE_URL from the environment (use a read-only role) — it
+ * Reads LEGACY_DATABASE_URL from initialized vault config (read-only role) — it
  * never prints it. It issues SELECTs inside a READ ONLY transaction: nothing
  * is created, altered, dropped or written, so running it again is a no-op.
  * See docs/MIGRATIONS.md and scripts/lib/legacy-baseline-core.mjs.
  *
- *   --require   treat an unset LEGACY_DATABASE_URL as an error (default: skip,
- *               loudly — for environments whose legacy data is retired)
+ *   --require   retained for compatibility; missing credentials always fail
  *
  * Exit codes:
- *   0  verified, fresh database (no dykil schema), or skipped (no URL)
+ *   0  verified or fresh database (no dykil schema)
  *   1  REFUSED: schema or data does not match what the importer expects —
  *      nothing was changed; fix by hand, do not force
  *   2  usage / configuration / connection error

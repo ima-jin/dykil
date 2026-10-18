@@ -80,8 +80,11 @@ Use `~/dev/dykil` and `.env.dev.example` / `scripts/deploy.sh dev` for dev.
   put the resulting `IMAJIN_APP_DID` in `.env.local`, deploy, then **paste the claim code on `<app>/claim`**
   (`/dykil/claim`). `check-env.mjs` fails while `IMAJIN_APP_DID` is still the `REPLACE_ME` placeholder. No hand-made
   keys, no key material in logs. Do not lose the keystore: a lost keystore needs a `reissueClaim` rebind.
-- **Create a read-only database role** for `LEGACY_DATABASE_URL` and put the connection string in each `.env.local`.
-  Prod and dev already contain the `dykil` schema; the baseline only reads it.
+- **Vault readiness:** after browser claim, sync the names-only `LEGACY_DATABASE_URL` manifest declaration
+  on `/jin` and use App secrets Set/Rotate with owner countersign for the existing read-only credential.
+  Never put it in `.env.local` or a shell. The baseline fails closed until the grant is active;
+  first-claim/deploy ordering is separately coordinated under imajin-ai#2241.
+  See [MIGRATIONS.md](./MIGRATIONS.md#vault-backed-legacy-credential-25). The baseline only reads.
 - **Create the `app.authorized` attestation** for `events:read` if ticket-gated surveys are wanted
   (`DYKIL_EVENTS_AUTHORIZATION_ID`). Optional; ticket-gated surveys answer 501 until it is set.
 - **Caddy** — the route already exists; verify it against the [snippet below](#caddy).
@@ -93,7 +96,7 @@ Use `~/dev/dykil` and `.env.dev.example` / `scripts/deploy.sh dev` for dev.
 2. `pm2 delete prod-dykil && pm2 save` (and `dev-dykil`) if an old entry still points at the monorepo's
    `~/prod/imajin-ai/apps/dykil` path. `deploy.sh` refuses to run while a same-named entry points elsewhere, because
    pm2 would "reload" it with the old script and cwd. Removing old entries is deliberately never automatic.
-3. Optionally dry-run the baseline against prod first: `node --env-file=.env.local scripts/legacy-baseline.mjs --require`.
+3. Optionally dry-run the baseline against prod first: `node --import tsx --env-file=.env.local scripts/legacy-baseline.mjs --require`.
 4. `scripts/deploy.sh dev`, verify, then `scripts/deploy.sh prod`.
 5. After the switch, remove the leftover `apps/dykil` folders from the server checkouts.
 
@@ -150,7 +153,9 @@ the old entry from `ima-jin/imajin-ai`'s `deploy/ecosystem.prod.config.js`.
 
 - **`baseline` exits 1** — the message lists exactly what differs. Do not edit the script to force it; fix the
   database (or tell the app owner the schema drifted), then re-run.
-- **`baseline` prints `SKIPPED`** — `LEGACY_DATABASE_URL` is unset, so the legacy schema was not verified.
+- **`baseline` exits 2** — required vault configuration or the legacy operation is unavailable.
+  Check the app/environment, bootstrap keystore and owner-countersigned App secrets grant on `/jin`;
+  never print the value or restore a plaintext env fallback. Missing credentials no longer skip.
 - **`env check` fails** — each line names a variable; see [ENVIRONMENTS.md](./ENVIRONMENTS.md).
 - **Health reports `claimed:false`** — the app is booted but unclaimed: open `<app>/claim` and paste the claim code
   (`/api/health` reports `claimed:true` once it is, including after every restart).

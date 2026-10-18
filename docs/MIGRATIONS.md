@@ -74,15 +74,50 @@ restart; operators can explicitly migrate before restart if they want schema ref
 `BEGIN READ ONLY`/`ROLLBACK`. It accepts the new ledger without writing it. It never calls the migration runner.
 
 ```bash
-node --env-file=.env.local scripts/legacy-baseline.mjs
-node --env-file=.env.local scripts/legacy-baseline.mjs --require
+node --import tsx --env-file=.env.local scripts/legacy-baseline.mjs
+node --import tsx --env-file=.env.local scripts/legacy-baseline.mjs --require
 ```
 
-Exit 0: verified, schema absent, or loud skip when URL absent. Exit 1: schema/data mismatch.
-Exit 2: usage/configuration/connection failure. `--require` makes absent legacy credentials an error.
+Exit 0: verified or schema absent. Exit 1: schema/data mismatch.
+Exit 2: usage/configuration/connection failure. Missing vault credentials always fail closed;
+`--require` remains accepted for compatibility, but is no longer needed.
 This verifier still checks counts and importer invariants, not application storage behavior. It tolerates extra
 indexes and ignores index/constraint names, as before. The migration adoption checks add stricter catalog guards.
 Do not force a mismatch through: reconcile the database deliberately and rerun.
+
+## Vault-backed legacy credential (#25)
+
+The audited main consumers of `LEGACY_DATABASE_URL` are the baseline and importer CLIs only.
+Web requests never read this credential. `instrumentation.ts` and `pnpm migrate` use the
+separate optional `DATABASE_URL`; this adoption neither expands that scope nor enables migrations.
+Unclaimed web boot and the browser claim flow remain unchanged.
+
+`scripts/lib/legacy-vault-boot.mjs` uses the published `@ima-jin/auth-client >=0.8.24`
+`createVaultBoot` boundary. The thin entrypoints await keystore-authenticated encrypted fetch,
+then dynamically import their application/DB workers. Workers read the typed, frozen config at
+module load, before constructing clients; the credential stays in memory and is never assigned
+to `process.env`. Missing, revoked, empty or refused credentials prevent worker import and DB
+initialization. Startup and driver errors are fixed diagnostics, never provider exception details.
+Both CLIs use the existing `tsx` loader to resolve the SDK's Next.js imports.
+
+Coordinated operator cutover prerequisites (not executed by this app-code change):
+
+1. Preserve the app's existing identity and per-environment bootstrap keystore from browser claim.
+2. On `/jin`, select the correct app/environment and **Sync manifest secrets**; review and sign
+   the name/kind-only `LEGACY_DATABASE_URL` / `operator-supplied` declaration in `imajin.app.json`.
+   Sync registers the recipe; it does not supply a value.
+3. In that app's **App secrets** panel, use **Set** for missing material, or **Rotate** for a reviewed
+   replacement. Supply the existing read-only connection only in the masked operator UI and obtain
+   the owner's countersign. Staged material is not active until countersign execution succeeds.
+   Do not generate a different database credential as a substitute.
+4. Coordinate readiness and the removal of the old plaintext entry through
+   [imajin-ai#2241](https://github.com/ima-jin/imajin-ai/issues/2241), then run the reviewed command.
+   Never copy, rotate or import values via shell/SSH, commands, logs, responses or env files.
+
+No live manifest sync, secret mutation, env edit or restart is authorized here.
+The deploy baseline now fails closed until these prerequisites exist, even with no legacy env entry;
+fresh first-claim orchestration must be coordinated separately, not bypassed by an env fallback.
+No changes to imajin-ai#2260 or auth-callback PR #23 are included.
 
 ## Tests and rollout evidence
 `pnpm test` runs the existing Vitest suite plus migration unit tests. For real SQL:

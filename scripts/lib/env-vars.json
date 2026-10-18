@@ -123,12 +123,12 @@
   },
   {
     "name": "LEGACY_DATABASE_URL",
-    "status": "optional",
+    "status": "forbidden",
     "phase": "script",
     "secret": true,
-    "summary": "Connection string for the OLD dykil.* Postgres schema, via a READ-ONLY role. Read only by scripts/legacy-baseline.mjs (deploy step 6) and scripts/import-legacy.ts — never at request time. Unset it once the legacy data is retired.",
-    "dev": "postgres://<read-only role>:<password>@localhost:5432/<dev_db>",
-    "prod": "postgres://<read-only role>:<password>@localhost:5432/<prod_db>"
+    "summary": "Vault-only operator-supplied read-only legacy connection. Both legacy commands load it into typed memory before importing their DB workers. No env fallback; do not set in an env file.",
+    "dev": "(vault only; never set)",
+    "prod": "(vault only; never set)"
   },
   {
     "name": "PORT",

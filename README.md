@@ -1,6 +1,6 @@
 # dykil — surveys & polls on Imajin primitives
 Operator identity setup uses the app's `/dykil/claim` page.
-Vault-backed legacy credential boot is tracked in [#25](https://github.com/ima-jin/dykil/issues/25).
+Legacy DB commands load their read-only credential from the vault before importing DB workers ([#25](https://github.com/ima-jin/dykil/issues/25)).
 
 > Forked from [`ima-jin/imajin-app-template`](https://github.com/ima-jin/imajin-app-template). **Read
 > [`AGENTS.md`](./AGENTS.md) first** — it defines the boundary this app must not cross.
@@ -68,6 +68,10 @@ scripts/deploy.sh prod    # pm2 prod-dykil, port 7101, https://jin.imajin.ai/dyk
   transactional runner only when that URL is set. Existing matching schemas are adopted without replaying DDL or
   changing data; absent migration credentials skip loudly without using the read-only `LEGACY_DATABASE_URL`.
   Every deploy retains the separate read-only legacy verifier — [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+- **Legacy credentials:** the baseline and importer require a claimed app keystore and an active
+  operator-supplied `LEGACY_DATABASE_URL` vault grant. No env fallback or missing-credential skip.
+  Manifest sync, owner-countersigned set/rotate and cutover are separate operator steps
+  ([`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md#vault-backed-legacy-credential-25)); this change does not deploy.
 - **Env:** `.env.example` (local), `.env.dev.example`, `.env.prod.example`; every variable is documented in
   [`docs/ENVIRONMENTS.md`](./docs/ENVIRONMENTS.md) and validated by `node scripts/check-env.mjs <dev|prod>`.
 
