@@ -144,4 +144,23 @@ describe('published SDK legacy credential boot', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(clientConstructor).not.toHaveBeenCalled();
   });
+
+  it.each(['import', 'baseline'])('does not even evaluate the %s worker when vault fetch is refused', async (command) => {
+    const evaluated = vi.fn(() => { throw new Error('FAKE_WORKER_MUST_NOT_LOAD'); });
+    const workerPath = command === 'import' ? '../lib/import-legacy' : '../lib/legacy-baseline.mjs';
+    vi.doMock(workerPath, evaluated);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error(FAKE_ERROR)));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      if (command === 'import') {
+        await expect(startCommand(command)).rejects.toThrow('vault boot: startup failed');
+      } else {
+        expect(await startCommand(command)).toBe(2);
+      }
+      expect(evaluated).not.toHaveBeenCalled();
+      expect(clientConstructor).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock(workerPath);
+    }
+  });
 });

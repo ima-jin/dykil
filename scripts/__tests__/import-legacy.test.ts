@@ -111,7 +111,7 @@ describe('scripts/import-legacy', () => {
     expect(getAppServiceTokenMock).not.toHaveBeenCalled();
   });
 
-  it('dry-run needs no credentials: it never bootstraps the signing identity or mints a token', async () => {
+  it('dry-run needs no signing identity or token beyond its vault-loaded read-only DB config', async () => {
     getAppServiceTokenMock.mockRejectedValue(new Error('no credentials'));
     bootstrapSigningIdentityMock.mockRejectedValue(new Error('no credentials'));
     const { runImport } = await import('../lib/import-legacy');
