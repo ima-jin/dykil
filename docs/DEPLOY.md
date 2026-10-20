@@ -60,6 +60,38 @@ app down. Two things are still open under #1985 and decide *when* prod should be
 Deploy **dev first**, confirm `https://dev-jin.imajin.ai/dykil/api/health`, and cut prod over only when the operator
 has decided those two are acceptable. Rollback is the old pm2 entry (see the cutover checklist).
 
+
+## Legacy import and retry (#27)
+
+After deploying the import fix to **dev**, use that environment's existing claimed keystore and
+owner-countersigned `LEGACY_DATABASE_URL` vault grant. The app service token needs `media:read`,
+`media:write`, and `attestations:write`; a failed media listing stops the import before any writes.
+Do not put the legacy credential or signing key into `.env.local`.
+
+Run from the environment's standalone dykil checkout:
+
+```bash
+node --env-file=.env.local --import tsx scripts/import-legacy.ts
+node --env-file=.env.local --import tsx scripts/import-legacy.ts --commit
+node --env-file=.env.local --import tsx scripts/import-legacy.ts --commit
+```
+
+The dry-run reads legacy rows without media or attestation writes. Commit mode first discovers this
+app DID's survey assets (published and private) by their upload context and exact deterministic filename.
+It reuses documents left by a failed run, including dev's four existing orphan survey documents;
+do not delete those assets before retrying. New response attestations reference those reused asset IDs.
+Responses remain explicitly node-witnessed legacy imports, signed with the app's own key.
+
+For dev's reported 4 surveys / 39 responses, the recovery run should report `surveysRead: 4`,
+`responsesRead: 39`, `documentsCreated: 0`, `attestationsCreated: 39`, and `skippedAlreadyImported: 0`.
+The second commit should report `documentsCreated: 0`, `attestationsCreated: 0`, and
+`skippedAlreadyImported: 39`. A fresh environment instead creates one document per legacy survey
+on its first commit. Writes remain sequential; run only one importer per environment at a time.
+
+Proceed to the prod deploy, dry-run, commit, and repeat-commit verification **only after dev succeeds**.
+Use prod's own identity and vault grant, never dev's credentials. Record actual summaries under
+imajin-ai#2522; fixture test results are not evidence of a live import.
+
 ## First deploy of an environment (fresh checkout)
 
 There is no checkout of this repo on the server yet. After the operator steps below are done, it is one command per
