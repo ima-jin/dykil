@@ -12,7 +12,8 @@
  *     row `dykil.survey_responses/<id>` stated Y at T; imported at T2",
  *     marked as such, and never upgraded to respondent-signed later.
  *
- * Idempotent: re-running skips any legacy row whose deterministic import id
+ * Idempotent: re-running reuses this app's survey assets by deterministic
+ * filename, and skips any legacy response whose deterministic import id
  * (see `legacyRowRef`) is already present among this app's own DID's
  * node-witnessed attestations. Dry-run by default — pass --commit to
  * actually write.
@@ -23,10 +24,11 @@
  * see src/lib/response-attestation.ts's provenance doc.
  */
 import { Client } from 'pg';
-import { sign } from '@ima-jin/auth';
+import { crypto } from '@ima-jin/auth';
 import { bootstrapSigningIdentity, getSigningIdentity } from '../../src/lib/auth/signing-identity';
 import { canonicalResponsePayload } from '../../src/lib/response-attestation';
 import { createAttestation, listAllAttestations } from '../../src/lib/kernel/attestations';
+import { listMySurveyAssets } from '../../src/lib/kernel/media';
 import { computeDocHash, normalizeSurveySettings, SURVEY_DOC_SCHEMA, surveyFilename, type SurveyDoc } from '../../src/lib/survey';
 import { mediaServiceUrl } from '../../src/lib/env';
 import { appServiceAuthHeaders, getAppServiceToken } from '../../src/lib/app-service-token';
@@ -106,13 +108,27 @@ function toSurveyDoc(row: LegacySurveyRow): SurveyDoc {
   };
 }
 
-/** Upload one legacy survey definition as a signed document. Returns the new asset id, or null in dry-run. */
-async function importSurveyDoc(row: LegacySurveyRow, commit: boolean): Promise<string | null> {
+/** Index this app's survey documents, including uploads left by a failed import. */
+async function fetchExistingSurveyAssets(): Promise<Map<string, string>> {
+  const request = new Request(`${mediaServiceUrl()}/api/assets`, { headers: await appServiceAuthHeaders() });
+  const assets = await listMySurveyAssets(request);
+  return new Map(assets.map((asset) => [asset.filename, asset.id]));
+}
+
+/** Reuse an existing survey document or upload it once. Dry-run never reads or writes media. */
+async function importSurveyDoc(
+  row: LegacySurveyRow,
+  commit: boolean,
+  existingAssets: Map<string, string>,
+): Promise<{ id: string; created: boolean } | null> {
   if (!commit) return null;
+  const filename = surveyFilename(row.id);
+  const existingId = existingAssets.get(filename);
+  if (existingId) return { id: existingId, created: false };
 
   const doc = toSurveyDoc(row);
   const form = new FormData();
-  form.set('file', new Blob([JSON.stringify(doc)], { type: 'application/json' }), surveyFilename(row.id));
+  form.set('file', new Blob([JSON.stringify(doc)], { type: 'application/json' }), filename);
   form.set('context', JSON.stringify({ app: 'dykil', feature: 'survey', access: doc.status === 'published' ? 'public' : 'private' }));
 
   // The import script runs with this app's OWN service credentials, not a
@@ -127,7 +143,8 @@ async function importSurveyDoc(row: LegacySurveyRow, commit: boolean): Promise<s
     throw new Error(`Failed to create signed doc for legacy survey ${row.id}: ${response.status}`);
   }
   const asset = (await response.json()) as { id: string };
-  return asset.id;
+  existingAssets.set(filename, asset.id);
+  return { id: asset.id, created: true };
 }
 
 /**
@@ -184,7 +201,8 @@ async function importResponseAttestation(params: {
 
   if (!params.commit) return true;
 
-  const signed = await sign(canonical, params.witnessPrivateKey, { id: params.witnessDid, type: 'agent' });
+  // The kernel verifies the canonical bytes directly, not a SignedMessage envelope.
+  const signature = await crypto.sign(canonical, params.witnessPrivateKey);
 
   await createAttestation(
     {
@@ -194,7 +212,7 @@ async function importResponseAttestation(params: {
       contextId: params.surveyAssetId,
       contextType: 'dykil.survey',
       payload,
-      signature: signed.signature,
+      signature,
       issuedAt,
       // The legacy ticket id rides as the indexed ref, same as a live response (imajin-ai#2534).
       ref: params.row.ticket_id,
@@ -203,6 +221,7 @@ async function importResponseAttestation(params: {
     await appServiceAuthHeaders(),
   );
 
+  params.alreadyImported.add(ref);
   return true;
 }
 
@@ -241,14 +260,15 @@ export async function runImport(argv: string[] = process.argv.slice(2)): Promise
 
     const assetIdBySurveyId = new Map<string, string>();
     const docBySurveyId = new Map<string, SurveyDoc>();
+    const existingAssets = commit ? await fetchExistingSurveyAssets() : new Map<string, string>();
 
     // Chain each operation: preserve idempotency/rate limits, never parallelize writes.
     await surveys.reduce<Promise<void>>(async (previous, row) => {
       await previous;
-      const assetId = await importSurveyDoc(row, commit);
-      if (assetId) {
-        assetIdBySurveyId.set(row.id, assetId);
-        summary.documentsCreated += 1;
+      const asset = await importSurveyDoc(row, commit, existingAssets);
+      if (asset) {
+        assetIdBySurveyId.set(row.id, asset.id);
+        if (asset.created) summary.documentsCreated += 1;
       }
       docBySurveyId.set(row.id, toSurveyDoc(row));
     }, Promise.resolve());
